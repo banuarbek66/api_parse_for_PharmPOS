@@ -1,0 +1,33 @@
+{
+  "provider_name": "Атамирас",
+  "format": "xml",
+  "items_path": "goods.good",
+  "sku_uid": "id",
+  "sku_name": "NAME",
+  "sku_price": "price",
+  "sku_stock": "stored",
+  "sku": "string",
+  "sku_serial": "string",
+  "sku_barcodes": "code",
+  "sku_srok": "shelflife",
+  "sku_step": "multiplicity",
+  "sku_marker": "marked",
+  "sku_pack": "pack",
+  "sku_box": "box",
+  "min_order": "min_order"
+}
+
+
+
+{
+  "provider_name": "string",
+  "json_url_get_price": "string",
+  "json_url_get_address": "string",
+  "json_url_get_order": "string",
+  "xml_url_get_price": "string",
+  "xml_url_get_address": "string",
+  "xml_url_get_order": "string",
+  "login": "string",
+  "password": "string",
+  "is_active": true
+}
