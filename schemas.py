@@ -45,6 +45,7 @@ class SupplierMappingBase(BaseModel):
     sku_marker: Optional[str] = None
     sku_pack: Optional[str] = None
     sku_box: Optional[str] = None
+    unit: Optional[str] = None
 
     min_order: Optional[str] = None
 
@@ -68,6 +69,8 @@ class SupplierMappingRead(SupplierMappingBase):
 class SupplierBase(BaseModel):
 
     provider_name: str
+    provider_bin: Optional[str] = None
+
 
     # --- JSON URL ---
     json_url_get_price: Optional[str] = None
@@ -148,6 +151,7 @@ class ProductBase(BaseModel):
     sku_marker: Optional[str] = None
     sku_pack: Optional[str] = None
     sku_box: Optional[str] = None
+    unit: Optional[str] = "упаковка"
 
     min_order: Optional[str] = None
 
@@ -178,9 +182,12 @@ class DailyProductRead(ProductBase):
 class AggregatedItem(BaseModel):
 
     provider_name: str
+    provider_bin: Optional[str] = None
+    
     city: Optional[str] = None
     producer: Optional[str] = None
     producer_country: Optional[str] = None 
+
 
     sku_uid: Optional[str] = None
     sku_name: Optional[str] = None  # ✅ НАЗВАНИЕ ТОВАРА
@@ -191,6 +198,7 @@ class AggregatedItem(BaseModel):
     sku_stock: Optional[str] = None
 
     sku_step: Optional[str] = None
+    unit: Optional[str] = None
     min_order: Optional[str] = None
 
     last_update: Optional[datetime] = None

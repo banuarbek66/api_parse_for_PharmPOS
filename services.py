@@ -169,7 +169,6 @@ class ParseService:
 
     @staticmethod
     def parse(raw_text: str, data_format: str) -> dict:
-
         fmt = (data_format or "").lower().strip()
 
         if fmt == "json":
@@ -197,6 +196,18 @@ class ParseService:
             if b and len(str(b)) >= 6
         ]
 
+        # === sku_step: жёстко приводим к 1, если 0 / None / мусор ===
+        raw_step = get_value(mapping.sku_step)
+
+        step_value = 1
+        if raw_step not in (None, "", "0", 0):
+            try:
+                iv = int(str(raw_step).replace(",", "."))
+                if iv > 0:
+                    step_value = iv
+            except Exception:
+                step_value = 1
+
         return {
             "sku_uid":      get_value(mapping.sku_uid),
             "sku_name":     get_value(mapping.sku_name),
@@ -208,16 +219,17 @@ class ParseService:
             "sku_barcodes": barcodes,
 
             "sku_srok":     get_value(mapping.sku_srok),
-            "sku_step":     get_value(mapping.sku_step),
+            "sku_step":     str(step_value),                   # 👈 уже нормализовано
             "sku_marker":   get_value(mapping.sku_marker),
             "sku_pack":     get_value(mapping.sku_pack),
             "sku_box":      get_value(mapping.sku_box),
 
-            "min_order":    get_value(mapping.min_order),
-            "producer": get_value(mapping.producer),
+            "unit":         get_value(mapping.unit),           # 👈 НОВОЕ
+
+            "min_order":        get_value(mapping.min_order),
+            "producer":         get_value(mapping.producer),
             "producer_country": get_value(mapping.producer_country),
         }
-
     @staticmethod
     def get_items_by_path(data: dict, path: Optional[str]) -> List[dict]:
 
@@ -479,32 +491,34 @@ class SyncService:
         for item in hourly:
             daily.append(
                 DailyProduct(
-                    producer=item.producer,
-                    producer_country=item.producer_country,
+            producer=item.producer,
+            producer_country=item.producer_country,
 
-                    provider_id=item.provider_id,
-                    provider_name=item.provider_name,
-                    city=item.city,
+            provider_id=item.provider_id,
+            provider_name=item.provider_name,
+            city=item.city,
 
-                    sku_uid=item.sku_uid,
-                    sku_name=item.sku_name,
-                    sku_price=item.sku_price,
-                    sku_stock=item.sku_stock,
+            sku_uid=item.sku_uid,
+            sku_name=item.sku_name,
+            sku_price=item.sku_price,
+            sku_stock=item.sku_stock,
 
-                    sku=item.sku,
-                    sku_serial=item.sku_serial,
-                    sku_barcodes=item.sku_barcodes,
+            sku=item.sku,
+            sku_serial=item.sku_serial,
+            sku_barcodes=item.sku_barcodes,
 
-                    sku_srok=item.sku_srok,
-                    sku_step=item.sku_step,
-                    sku_marker=item.sku_marker,
-                    sku_pack=item.sku_pack,
-                    sku_box=item.sku_box,
+            sku_srok=item.sku_srok,
+            sku_step=item.sku_step,
+            sku_marker=item.sku_marker,
+            sku_pack=item.sku_pack,
+            sku_box=item.sku_box,
 
-                    min_order=item.min_order,
-                    snapshot_date=datetime.utcnow().date(),
-                )
-            )
+            unit=item.unit,                # 👈 НОВОЕ
+
+            min_order=item.min_order,
+            snapshot_date=datetime.utcnow().date(),
+        )
+    )
 
         if daily:
             DailyRepo.bulk_create(db, daily)
@@ -544,6 +558,18 @@ class ProductService:
         if not items:
             items = DailyRepo.get_latest_by_barcode(db, barcode, city=city)
 
+        if not items:
+            return []
+
+        # Собираем BIN-ы поставщиков по provider_id
+        provider_ids = {item.provider_id for item in items}
+        suppliers = (
+            db.query(Supplier)
+            .filter(Supplier.id.in_(provider_ids))
+            .all()
+        )
+        bins_by_id = {s.id: s.provider_bin for s in suppliers}
+
         result: List[AggregatedItem] = []
 
         for item in items:
@@ -563,7 +589,11 @@ class ProductService:
             result.append(
                 AggregatedItem(
                     provider_name=item.provider_name,
+                    provider_bin=bins_by_id.get(item.provider_id),   # 👈 BIN
+
                     city=item.city,
+                    producer=item.producer,                         # 👈 producer
+                    producer_country=item.producer_country,         # 👈 producer_country
 
                     sku_uid=item.sku_uid,
                     sku_name=item.sku_name,
@@ -571,6 +601,9 @@ class ProductService:
 
                     sku_price=item.sku_price,
                     sku_stock=item.sku_stock,
+
+                    unit=item.unit,                                 # 👈 unit
+
                     sku_step=item.sku_step,
                     min_order=item.min_order,
                     last_update=item.created_at,
@@ -578,6 +611,7 @@ class ProductService:
             )
 
         return result
+
 
 
 

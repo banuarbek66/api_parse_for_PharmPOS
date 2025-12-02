@@ -59,6 +59,7 @@ class SupplierMapping(Base):
     sku_marker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     sku_pack: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     sku_box: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    unit: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) 
 
     min_order: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
@@ -88,6 +89,8 @@ class Supplier(Base):
     city_param_name: Mapped[Optional[str]] = mapped_column(String(50), default="city_id")
 
     provider_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    provider_bin = mapped_column(String(20), nullable=True)
+
 
     # JSON URLS
     json_url_get_price: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -146,7 +149,7 @@ class HourlyProduct(Base):
     sku_marker: Mapped[Optional[str]] = mapped_column(String(255))
     sku_pack: Mapped[Optional[str]] = mapped_column(String(255))
     sku_box: Mapped[Optional[str]] = mapped_column(String(255))
-
+    unit: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) 
     min_order: Mapped[Optional[str]] = mapped_column(String(255))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -194,7 +197,7 @@ class DailyProduct(Base):
     sku_marker: Mapped[Optional[str]] = mapped_column(String(255))
     sku_pack: Mapped[Optional[str]] = mapped_column(String(255))
     sku_box: Mapped[Optional[str]] = mapped_column(String(255))
-
+    unit: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) 
     min_order: Mapped[Optional[str]] = mapped_column(String(255))
 
     snapshot_date: Mapped[date] = mapped_column(Date, default=date.today)
