@@ -262,6 +262,29 @@ class HourlyRepo:
             .order_by(HourlyProduct.provider_name)
             .all()
         )
+    from datetime import datetime
+
+    @staticmethod
+    def get_for_period(
+        db: Session,
+        start_dt: datetime,
+        end_dt: datetime,
+        provider_name: Optional[str] = None,
+        city: Optional[str] = None,
+    ) -> List[HourlyProduct]:
+
+        q = db.query(HourlyProduct).filter(
+            HourlyProduct.created_at >= start_dt,
+            HourlyProduct.created_at <= end_dt,
+        )
+
+        if provider_name:
+            q = q.filter(HourlyProduct.provider_name == provider_name)
+
+        if city:
+            q = q.filter(HourlyProduct.city == city)
+
+        return q.all()
 
 # ============================================================
 # ✅ DAILY PRODUCTS — ТО ЖЕ САМОЕ (НА СЛУЧАЙ ОТСУТСТВИЯ В HOURLY)
@@ -324,3 +347,24 @@ class DailyRepo:
             .order_by(DailyProduct.provider_name)
             .all()
         )
+
+    @staticmethod
+    def get_range(
+        db: Session,
+        start_date,
+        end_date,
+        provider_name=None,
+        city=None
+    ):
+        q = db.query(DailyProduct).filter(
+            DailyProduct.snapshot_date >= start_date,
+            DailyProduct.snapshot_date <= end_date
+        )
+
+        if provider_name:
+            q = q.filter(DailyProduct.provider_name == provider_name)
+
+        if city:
+            q = q.filter(DailyProduct.city == city)
+
+        return q.all()

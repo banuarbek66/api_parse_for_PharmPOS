@@ -107,47 +107,59 @@ class FetchService:
     @staticmethod
     def fetch(
         url: str,
-        login: Optional[str] = None,
-        password: Optional[str] = None
+        login: str | None = None,
+        password: str | None = None
     ) -> str:
 
         if not url.startswith("http://") and not url.startswith("https://"):
             url = "http://" + url
 
-        headers: dict = {
+        headers = {
             "User-Agent": "PharmPOS/1.0"
         }
 
         if login and password:
-            auth_raw = f"{login}:{password}"
-            auth_bytes = auth_raw.encode("utf-8")
-            auth_b64 = base64.b64encode(auth_bytes).decode("ascii")
-            headers["Authorization"] = f"Basic {auth_b64}"
+            raw = f"{login}:{password}".encode("utf-8")
+            headers["Authorization"] = "Basic " + base64.b64encode(raw).decode("ascii")
 
         response = requests.get(
             url,
             headers=headers,
-            timeout=HTTP_TIMEOUT,
+            timeout=20,
             verify=False
         )
-
         response.raise_for_status()
 
-        # 1. Получаем «сырае тело» ответа
-        raw_bytes = response.content
+        raw = response.content
 
-        # 2. Пытаемся определить кодировку автоматически
-        detected = chardet.detect(raw_bytes)
+        # Определяем кодировку
+        detected = chardet.detect(raw)
         encoding = detected.get("encoding") or "utf-8"
 
+        # Функция для определения крокозябр
+        def looks_broken(text: str) -> bool:
+            patterns = ["Ð", "Ñ", "â", "€", "", ""]
+            count = sum(1 for p in patterns if p in text)
+            return count >= 2
+
+        # ШАГ 1 — пробуем autodetect
         try:
-            text = raw_bytes.decode(encoding)
-        except Exception:
-            # fallback на windows-1251 (самая частая у аптек)
-            text = raw_bytes.decode("cp1251", errors="ignore")
+            text = raw.decode(encoding, errors="strict")
+            if not looks_broken(text):
+                return text
+        except:
+            pass
 
-        return text
+        # ШАГ 2 — пробуем CP1251 принудительно
+        try:
+            text = raw.decode("cp1251", errors="strict")
+            if not looks_broken(text):
+                return text
+        except:
+            pass
 
+        # ШАГ 3 — fallback latin-1
+        return raw.decode("latin-1", errors="ignore")
 
 # ============================================================
 # PARSE SERVICE
@@ -601,4 +613,206 @@ class SupplierMappingService:
             "status": "success",
             "mapping_id": str(mapping.id),
             "sync_result": result,
+        }
+    
+
+
+# ============================================================
+# UNIVERSAL ANALYTICS SERVICE — DAILY / WEEKLY / MONTHLY
+# ============================================================
+
+from datetime import datetime, time, timedelta
+from collections import defaultdict
+
+from datetime import datetime, time, timedelta
+from collections import defaultdict
+from typing import Optional
+
+from datetime import datetime, time, timedelta
+from collections import defaultdict
+from typing import Optional
+from sqlalchemy.orm import Session
+
+class AnalyticsService:
+
+    # ------------------------------------------------------------
+    @staticmethod
+    def get_period_bounds(period: str, start_date=None, end_date=None):
+        """
+        Периоды:
+        today  → с 01:00 сегодня
+        week   → -7 дней
+        month  → -30 дней
+        custom → переданные даты
+        """
+
+        now = datetime.utcnow()
+
+        if period == "today":
+            start = datetime.combine(now.date(), time(hour=1))
+            return start, now
+
+        if period == "week":
+            start = now - timedelta(days=7)
+            return start, now
+
+        if period == "month":
+            start = now - timedelta(days=30)
+            return start, now
+
+        if period == "custom":
+            if not start_date or not end_date:
+                raise ValueError("Custom period requires start_date and end_date")
+            return start_date, end_date
+
+        raise ValueError(f"Unknown period type: {period}")
+
+    # ------------------------------------------------------------
+    @staticmethod
+    def get_hot_products_period(
+        db: Session,
+        period: str = "today",
+        start_date=None,
+        end_date=None,
+        provider_name: Optional[str] = None,
+        city: Optional[str] = None,
+        limit: int = 10
+    ) -> dict:
+
+        start_dt, end_dt = AnalyticsService.get_period_bounds(period, start_date, end_date)
+        now = datetime.utcnow()
+
+        # Подключаем Hourly только если период захватывает сегодня
+        include_hourly = start_dt.date() <= now.date()
+
+        hourly = []
+        if include_hourly:
+            today_start = datetime.combine(now.date(), time(hour=1))
+            hourly = HourlyRepo.get_for_period(
+                db=db,
+                start_dt=max(start_dt, today_start),
+                end_dt=end_dt,
+                provider_name=provider_name,
+                city=city
+            )
+
+        # Daily — для всех прошлых дней
+        daily = DailyRepo.get_range(
+            db=db,
+            start_date=start_dt.date(),
+            end_date=end_dt.date(),
+            provider_name=provider_name,
+            city=city
+        )
+
+        # Нет данных — вернуть пустой ответ
+        if not hourly and not daily:
+            return {
+                "status": "empty",
+                "message": "No data found for requested period",
+                "items": []
+            }
+
+        # ------------------------------------------------------------
+        # Собираем совмещённые данные
+        # ------------------------------------------------------------
+
+        combined = defaultdict(list)
+
+        # DAILY
+        for d in daily:
+            key = (d.provider_name, d.city, d.sku_uid)
+            combined[key].append((
+                d.snapshot_date,     # date
+                d.sku_stock,
+                d.sku_name,
+                d.sku_barcodes,
+                "daily"
+            ))
+
+        # HOURLY
+        for h in hourly:
+            key = (h.provider_name, h.city, h.sku_uid)
+            combined[key].append((
+                h.created_at,        # datetime
+                h.sku_stock,
+                h.sku_name,
+                h.sku_barcodes,
+                "hourly"
+            ))
+
+        # ------------------------------------------------------------
+        # Обработка данных
+        # ------------------------------------------------------------
+
+        hot = []
+
+        def to_number(value):
+            """Безопасное преобразование остатков."""
+            if value is None:
+                return 0
+            try:
+                return float(value)
+            except:
+                return 0
+
+        for (provider, city_, sku_uid), entries in combined.items():
+
+            # --- 1. Нормализуем date → datetime ---
+            normalized_entries = []
+            for t, stock, name, barcodes, src in entries:
+                if isinstance(t, datetime):
+                    normalized_entries.append((t, stock, name, barcodes, src))
+                else:
+                    # t — datetime.date → превращаем в datetime
+                    normalized_entries.append((
+                        datetime.combine(t, time.min),
+                        stock,
+                        name,
+                        barcodes,
+                        src
+                    ))
+
+            entries = normalized_entries
+
+            # --- 2. Сортируем по времени ---
+            entries.sort(key=lambda x: x[0])
+
+            # --- 3. Выбираем начало/конец периода ---
+            start_stock = to_number(entries[0][1])
+            end_stock = to_number(entries[-1][1])
+
+            sku_name = entries[-1][2]
+            sku_barcodes = entries[-1][3]
+
+            if start_stock <= 0:
+                continue
+
+            sold = start_stock - end_stock
+            if sold <= 0:
+                continue
+
+            percent = round(sold / start_stock * 100, 2)
+
+            hot.append({
+                "provider_name": provider,
+                "city": city_,
+                "sku_uid": sku_uid,
+                "sku_name": sku_name,
+                "sku_barcodes": sku_barcodes,
+                "start_stock": start_stock,
+                "end_stock": end_stock,
+                "sold": sold,
+                "percent": percent
+            })
+
+        # --- 4. Сортировка по убыванию ---
+        hot.sort(key=lambda x: (x["percent"], x["sold"]), reverse=True)
+
+        return {
+            "status": "success",
+            "period": period,
+            "from": start_dt.isoformat(),
+            "to": end_dt.isoformat(),
+            "items": hot[:limit]
         }
