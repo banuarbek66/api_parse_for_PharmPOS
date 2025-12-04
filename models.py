@@ -244,3 +244,17 @@ class CityResponse(Base):
             f"<CityResponse {self.provider_name} | "
             f"{self.supplier_city_code} | {self.supplier_city_name} -> {self.normalized_city}>"
         )
+    
+
+class SupplierUnit(Base):
+    __tablename__ = "supplier_units"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+
+    provider_name: Mapped[str] = mapped_column(String(100), index=True)
+    supplier_unit: Mapped[str] = mapped_column(String(100), index=True)
+    normalized_unit: Mapped[str] = mapped_column(String(100), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    

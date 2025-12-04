@@ -9,6 +9,7 @@ import v1.sync
 import v1.health
 import v1.cities
 import v1.analytics
+import v1.units
 
 
 
@@ -20,5 +21,5 @@ router.include_router(v1.products.router, tags=["Products"])
 router.include_router(v1.sync.router, tags=["Sync"])
 router.include_router(v1.health.router, tags=["Health"])
 router.include_router(v1.cities.router, tags=['city-response'])
-
+router.include_router(v1.units.router, tags=["Units"])
 router.include_router(v1.analytics.router, tags=["Analytics"])

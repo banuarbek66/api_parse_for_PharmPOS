@@ -2,9 +2,9 @@
 # ============================================================
 # ГЛОБАЛЬНЫЕ НАСТРОЙКИ ДЛЯ PHARM-POS SUPPLIER AGGREGATOR
 # ============================================================
-
+import models 
 from datetime import time
-
+from sqlalchemy.orm import Session
 # ------------------------------------------------------------
 # ⏱ ЧАСОВОЕ ОБНОВЛЕНИЕ (РАБОТАЕТ 24/7)
 # ------------------------------------------------------------
@@ -67,3 +67,34 @@ HTTP_BACKOFF = 1        # задержка между попытками (сек
 MAX_PRODUCTS_PER_PROVIDER = 10_000_000
 
 ALLOW_EMPTY_FIELDS = True
+
+from schemas import SupplierUnitCreate
+
+def create_or_update_supplier_unit(db: Session, data: SupplierUnitCreate):
+
+    existing = (
+        db.query(models.SupplierUnit)
+        .filter(
+            models.SupplierUnit.provider_name == data.provider_name,
+            models.SupplierUnit.supplier_unit == data.supplier_unit,
+        )
+        .first()
+    )
+
+    if existing:
+        existing.normalized_unit = data.normalized_unit
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    new = models.SupplierUnit(
+        provider_name=data.provider_name,
+        supplier_unit=data.supplier_unit,
+        normalized_unit=data.normalized_unit
+    )
+
+    db.add(new)
+    db.commit()
+    db.refresh(new)
+
+    return new

@@ -15,8 +15,22 @@ from models import (
     DailyProduct,
     SupplierCity,
     CityResponse,
+    SupplierUnit,
 )
 
+
+class SupplierUnitRepo:
+
+    @staticmethod
+    def find(db: Session, provider: str, raw_unit: str):
+        return (
+            db.query(SupplierUnit)
+            .filter(
+                SupplierUnit.provider_name == provider,
+                SupplierUnit.supplier_unit == raw_unit
+            )
+            .first()
+        )
 # ============================================================
 # SUPPLIER REPO
 # ============================================================

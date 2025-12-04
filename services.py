@@ -261,6 +261,7 @@ class ParseService:
 
         return []
 
+from repositories import SupplierUnitRepo
 
 # ============================================================
 # SYNC SERVICE
@@ -285,7 +286,7 @@ class SyncService:
         return None
 
     # ------------------------------------------------------------
-    # ОСНОВНАЯ СИНХРОНИЗАЦИЯ ОДНОГО ПОСТАВЩИКА (С УЧЁТОМ ГОРОДОВ)
+    # ОСНОВНАЯ СИНХРОНИЗАЦИЯ ОДНОГО ПОСТАВЩИКА (с нормализацией unit)
     # ------------------------------------------------------------
     @staticmethod
     def sync_single_supplier(
@@ -315,8 +316,7 @@ class SyncService:
         total_products = 0
 
         # =========================================================
-        # ЕСЛИ ГОРОД ПЕРЕДАЁТСЯ ЧЕРЕЗ QUERY PARAMS (city_in_params = True)
-        # Берём список городов из CityResponse
+        # СЦЕНАРИЙ 1: Goрода задаются через params (city_in_params = True)
         # =========================================================
         if mapping.city_in_params:
 
@@ -334,8 +334,7 @@ class SyncService:
                 }
 
             for city in cities:
-                # 1) Если в URL есть плейсхолдер {city} → подставляем прямо туда
-                # 2) Иначе добавляем параметр из supplier.city_param_name (по умолчанию "city_id")
+                # Подстановка города
                 if "{city}" in base_url:
                     url = base_url.format(city=city.supplier_city_code)
                 else:
@@ -344,23 +343,21 @@ class SyncService:
                     url = f"{base_url}{sep}{param_name}={city.supplier_city_code}"
 
                 try:
-                    raw_text = FetchService.fetch(
-                        url,
-                        supplier.login,
-                        supplier.password
-                    )
-
+                    raw_text = FetchService.fetch(url, supplier.login, supplier.password)
                     parsed_data = ParseService.parse(raw_text, mapping.format)
-
-                    items = ParseService.get_items_by_path(
-                        parsed_data,
-                        mapping.items_path
-                    )
+                    items = ParseService.get_items_by_path(parsed_data, mapping.items_path)
 
                     objects: List[HourlyProduct] = []
 
                     for item in items[:MAX_PRODUCTS_PER_PROVIDER]:
                         normalized = ParseService.normalize(item, mapping)
+
+                        # 🔥 UNIT NORMALIZATION
+                        raw_unit = normalized.get("unit")
+                        if raw_unit:
+                            fixed = SupplierUnitRepo.find(db, supplier.provider_name, raw_unit)
+                            if fixed:
+                                normalized["unit"] = fixed.normalized_unit
 
                         product = HourlyProduct(
                             provider_id=supplier.id,
@@ -394,8 +391,7 @@ class SyncService:
                     })
 
         # =========================================================
-        # ЕСЛИ ГОРОД ПРИХОДИТ В BODY / В ОТВЕТЕ ПОСТАВЩИКА
-        # (city_in_params = False)
+        # СЦЕНАРИЙ 2: Город приходит из BODY/XML/JSON
         # =========================================================
         else:
             try:
@@ -405,10 +401,7 @@ class SyncService:
                     supplier.password
                 )
 
-                parsed_data = ParseService.parse(
-                    raw_text,
-                    mapping.format
-                )
+                parsed_data = ParseService.parse(raw_text, mapping.format)
 
                 city_value = CityService.extract_city_from_response(
                     mapping,
@@ -422,15 +415,19 @@ class SyncService:
                     city_name=city_value,
                 )
 
-                items = ParseService.get_items_by_path(
-                    parsed_data,
-                    mapping.items_path
-                )
+                items = ParseService.get_items_by_path(parsed_data, mapping.items_path)
 
                 objects: List[HourlyProduct] = []
 
                 for item in items[:MAX_PRODUCTS_PER_PROVIDER]:
                     normalized = ParseService.normalize(item, mapping)
+
+                    # 🔥 UNIT NORMALIZATION
+                    raw_unit = normalized.get("unit")
+                    if raw_unit:
+                        fixed = SupplierUnitRepo.find(db, supplier.provider_name, raw_unit)
+                        if fixed:
+                            normalized["unit"] = fixed.normalized_unit
 
                     product = HourlyProduct(
                         provider_id=supplier.id,
@@ -469,8 +466,6 @@ class SyncService:
         }
 
     # ------------------------------------------------------------
-    # СИНХРОНИЗАЦИЯ ВСЕХ ПОСТАВЩИКОВ
-    # ------------------------------------------------------------
     @staticmethod
     def run_hourly_sync(db: Session) -> List[dict]:
         results: List[dict] = []
@@ -479,8 +474,6 @@ class SyncService:
             results.append(result)
         return results
 
-    # ------------------------------------------------------------
-    # ЕЖЕДНЕВНЫЙ СНИМОК
     # ------------------------------------------------------------
     @staticmethod
     def run_daily_snapshot(db: Session) -> int:
@@ -491,34 +484,34 @@ class SyncService:
         for item in hourly:
             daily.append(
                 DailyProduct(
-            producer=item.producer,
-            producer_country=item.producer_country,
+                    producer=item.producer,
+                    producer_country=item.producer_country,
 
-            provider_id=item.provider_id,
-            provider_name=item.provider_name,
-            city=item.city,
+                    provider_id=item.provider_id,
+                    provider_name=item.provider_name,
+                    city=item.city,
 
-            sku_uid=item.sku_uid,
-            sku_name=item.sku_name,
-            sku_price=item.sku_price,
-            sku_stock=item.sku_stock,
+                    sku_uid=item.sku_uid,
+                    sku_name=item.sku_name,
+                    sku_price=item.sku_price,
+                    sku_stock=item.sku_stock,
 
-            sku=item.sku,
-            sku_serial=item.sku_serial,
-            sku_barcodes=item.sku_barcodes,
+                    sku=item.sku,
+                    sku_serial=item.sku_serial,
+                    sku_barcodes=item.sku_barcodes,
 
-            sku_srok=item.sku_srok,
-            sku_step=item.sku_step,
-            sku_marker=item.sku_marker,
-            sku_pack=item.sku_pack,
-            sku_box=item.sku_box,
+                    sku_srok=item.sku_srok,
+                    sku_step=item.sku_step,
+                    sku_marker=item.sku_marker,
+                    sku_pack=item.sku_pack,
+                    sku_box=item.sku_box,
 
-            unit=item.unit,                # 👈 НОВОЕ
+                    unit=item.unit,  # 🔥 уже нормализован
 
-            min_order=item.min_order,
-            snapshot_date=datetime.utcnow().date(),
-        )
-    )
+                    min_order=item.min_order,
+                    snapshot_date=datetime.utcnow().date(),
+                )
+            )
 
         if daily:
             DailyRepo.bulk_create(db, daily)
@@ -526,14 +519,10 @@ class SyncService:
         return len(daily)
 
     # ------------------------------------------------------------
-    # ЧИСТКА HOURLY-ТАБЛИЦЫ
-    # ------------------------------------------------------------
     @staticmethod
     def cleanup_hourly_table(db: Session) -> bool:
         HourlyRepo.clear_table(db)
         return True
-
-
 
 
   
@@ -558,18 +547,6 @@ class ProductService:
         if not items:
             items = DailyRepo.get_latest_by_barcode(db, barcode, city=city)
 
-        if not items:
-            return []
-
-        # Собираем BIN-ы поставщиков по provider_id
-        provider_ids = {item.provider_id for item in items}
-        suppliers = (
-            db.query(Supplier)
-            .filter(Supplier.id.in_(provider_ids))
-            .all()
-        )
-        bins_by_id = {s.id: s.provider_bin for s in suppliers}
-
         result: List[AggregatedItem] = []
 
         for item in items:
@@ -589,11 +566,10 @@ class ProductService:
             result.append(
                 AggregatedItem(
                     provider_name=item.provider_name,
-                    provider_bin=bins_by_id.get(item.provider_id),   # 👈 BIN
 
                     city=item.city,
-                    producer=item.producer,                         # 👈 producer
-                    producer_country=item.producer_country,         # 👈 producer_country
+                    producer=getattr(item, "producer", None),
+                    producer_country=getattr(item, "producer_country", None),
 
                     sku_uid=item.sku_uid,
                     sku_name=item.sku_name,
@@ -601,11 +577,14 @@ class ProductService:
 
                     sku_price=item.sku_price,
                     sku_stock=item.sku_stock,
-
-                    unit=item.unit,                                 # 👈 unit
-
                     sku_step=item.sku_step,
                     min_order=item.min_order,
+
+                    # 🔹 добавляем серия / срок / маркер
+                    sku_serial=getattr(item, "sku_serial", None),
+                    sku_srok=getattr(item, "sku_srok", None),
+                    sku_marker=getattr(item, "sku_marker", None),
+
                     last_update=item.created_at,
                 )
             )

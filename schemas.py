@@ -201,6 +201,10 @@ class AggregatedItem(BaseModel):
     unit: Optional[str] = None
     min_order: Optional[str] = None
 
+    sku_serial: Optional[str] = None     # серия
+    sku_srok: Optional[str] = None       # срок годности
+    sku_marker: Optional[str] = None 
+
     last_update: Optional[datetime] = None
 
 
@@ -235,6 +239,23 @@ class CityResponseCreate(BaseModel):
 
 class CityResponseRead(CityResponseCreate):
     id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierUnitCreate(BaseModel):
+    provider_name: str
+    supplier_unit: str
+    normalized_unit: str
+
+
+class SupplierUnitOut(BaseModel):
+    id: int
+    provider_name: str
+    supplier_unit: str
+    normalized_unit: str
     created_at: datetime
 
     class Config:
