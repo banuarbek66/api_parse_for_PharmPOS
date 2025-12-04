@@ -1,2 +1,104 @@
+# ==========================================
+# PYTHON
+# ==========================================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+ENV/
+.vscode/
+
+# ==========================================
+# OS FILES
+# ==========================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux FS garbage
+*.swp
+*.swo
+
+# ==========================================
+# LOGS / TEMP
+# ==========================================
+*.log
+*.pid
+*.out
+*.tmp
+
+# Uvicorn / Gunicorn logs
+logs/
+log/
+
+# ==========================================
+# ENVIRONMENT VARIABLES
+# ==========================================
+.env
+.env.*
+*.env.local
+*.env.dev
+*.env.production
+
+# ==========================================
+# PYCHARM / VS CODE
+# ==========================================
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+.history/
+
+# ==========================================
+# CACHE
+# ==========================================
+.cache/
+pytest_cache/
+.mypy_cache/
+.pytest_cache/
+coverage.xml
+
+# ==========================================
+# CUSTOM FOR YOUR PROJECT
+# ==========================================
+# Ignore compiled mapping caches (if added)
+mapping_cache/
+city_cache/
+supplier_cache/
+
+# Local test dumps
+*.json.dump
+*.xml.dump
+
+# ==========================================
+# DO NOT IGNORE YOUR SOURCE FILES
+# (just for protection)
+# ==========================================
+!app/
+!main.py
+!services.py
+!models.py
+!repositories.py
+!schemas.py
+!utils.py
+!core.py

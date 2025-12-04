@@ -4,6 +4,7 @@
 # ============================================================
 
 from typing import List, Optional
+from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -18,19 +19,50 @@ from models import (
     SupplierUnit,
 )
 
+from utils import clean_unit
+
+
+# ============================================================
+# SUPPLIER UNIT REPO — нормализация единиц измерения
+# ============================================================
 
 class SupplierUnitRepo:
 
     @staticmethod
     def find(db: Session, provider: str, raw_unit: str):
+        """
+        Ищем нормализованную единицу измерения.
+        1) точное совпадение (cleaned)
+        2) мягкий поиск через ilike
+        """
+        cleaned = clean_unit(raw_unit).lower().strip()
+
+        if not cleaned:
+            return None
+
+        # --- 1: точное совпадение ---
+        record = (
+            db.query(SupplierUnit)
+            .filter(
+                SupplierUnit.provider_name == provider,
+                func.lower(SupplierUnit.supplier_unit) == cleaned
+            )
+            .first()
+        )
+        if record:
+            return record
+
+        # --- 2: мягкое совпадение ---
         return (
             db.query(SupplierUnit)
             .filter(
                 SupplierUnit.provider_name == provider,
-                SupplierUnit.supplier_unit == raw_unit
+                SupplierUnit.supplier_unit.ilike(f"%{cleaned}%")
             )
             .first()
         )
+
+
 # ============================================================
 # SUPPLIER REPO
 # ============================================================
@@ -73,6 +105,7 @@ class SupplierRepo:
         db.delete(supplier)
         db.commit()
 
+
 # ============================================================
 # MAPPING REPO
 # ============================================================
@@ -107,18 +140,15 @@ class MappingRepo:
         db.delete(mapping)
         db.commit()
 
+
 # ============================================================
-# SUPPLIER CITY REPO (старый механизм - сохранён)
+# SUPPLIER CITY REPO — старый механизм
 # ============================================================
 
 class SupplierCityRepo:
 
     @staticmethod
-    def get(
-        db: Session,
-        provider_name: str,
-        supplier_city_code: str,
-    ) -> Optional[SupplierCity]:
+    def get(db: Session, provider_name: str, supplier_city_code: str) -> Optional[SupplierCity]:
         return (
             db.query(SupplierCity)
             .filter(
@@ -129,12 +159,7 @@ class SupplierCityRepo:
         )
 
     @staticmethod
-    def create(
-        db: Session,
-        provider_name: str,
-        supplier_city_code: str,
-        normalized_city: str,
-    ) -> SupplierCity:
+    def create(db: Session, provider_name: str, supplier_city_code: str, normalized_city: str) -> SupplierCity:
         city = SupplierCity(
             provider_name=provider_name,
             supplier_city_code=supplier_city_code,
@@ -146,25 +171,15 @@ class SupplierCityRepo:
         return city
 
     @staticmethod
-    def get_or_create(
-        db: Session,
-        provider_name: str,
-        supplier_city_code: str,
-        normalized_city: str,
-    ) -> SupplierCity:
+    def get_or_create(db: Session, provider_name: str, supplier_city_code: str, normalized_city: str) -> SupplierCity:
         city = SupplierCityRepo.get(db, provider_name, supplier_city_code)
         if city:
             return city
+        return SupplierCityRepo.create(db, provider_name, supplier_city_code, normalized_city)
 
-        return SupplierCityRepo.create(
-            db,
-            provider_name=provider_name,
-            supplier_city_code=supplier_city_code,
-            normalized_city=normalized_city,
-        )
 
 # ============================================================
-# ✅ CITY RESPONSE REPO (ТВОЯ ГЛАВНАЯ ЛОГИКА ГОРОДОВ)
+# CITY RESPONSE — главная логика городов
 # ============================================================
 
 class CityResponseRepo:
@@ -213,7 +228,7 @@ class CityResponseRepo:
 
 
 # ============================================================
-# ✅ HOURLY PRODUCTS — ФИНАЛЬНЫЙ ПРАВИЛЬНЫЙ ПОИСК
+# HOURLY PRODUCTS
 # ============================================================
 
 class HourlyRepo:
@@ -224,7 +239,7 @@ class HourlyRepo:
         db.commit()
 
     @staticmethod
-    def get_all(db: Session) -> List[HourlyProduct]:
+    def get_all(db: Session):
         return db.query(HourlyProduct).all()
 
     @staticmethod
@@ -276,7 +291,6 @@ class HourlyRepo:
             .order_by(HourlyProduct.provider_name)
             .all()
         )
-    from datetime import datetime
 
     @staticmethod
     def get_for_period(
@@ -300,8 +314,9 @@ class HourlyRepo:
 
         return q.all()
 
+
 # ============================================================
-# ✅ DAILY PRODUCTS — ТО ЖЕ САМОЕ (НА СЛУЧАЙ ОТСУТСТВИЯ В HOURLY)
+# DAILY PRODUCTS
 # ============================================================
 
 class DailyRepo:
@@ -312,37 +327,39 @@ class DailyRepo:
         db.commit()
 
     @staticmethod
-    def get_all(db: Session) -> List[DailyProduct]:
+    def get_all(db: Session):
         return db.query(DailyProduct).all()
 
     @staticmethod
     def clear_by_date(db: Session, snapshot_date):
-        (
-            db.query(DailyProduct)
-            .filter(DailyProduct.snapshot_date == snapshot_date)
-            .delete()
-        )
+        db.query(DailyProduct).filter(
+            DailyProduct.snapshot_date == snapshot_date
+        ).delete()
         db.commit()
 
     @staticmethod
     def get_latest_by_barcode(
         db: Session,
         barcode: str,
-        city: str
+        city: Optional[str] = None
     ) -> List[DailyProduct]:
 
-        barcode_json = [barcode]
+        barcode_json = [str(barcode)]
 
-        subquery = (
+        base_query = (
             db.query(
                 DailyProduct.provider_name,
                 DailyProduct.city,
                 func.max(DailyProduct.created_at).label("max_date")
             )
-            .filter(
-                DailyProduct.sku_barcodes.contains(barcode_json),
-                DailyProduct.city == city
-            )
+            .filter(DailyProduct.sku_barcodes.contains(barcode_json))
+        )
+
+        if city:
+            base_query = base_query.filter(DailyProduct.city == city)
+
+        subquery = (
+            base_query
             .group_by(
                 DailyProduct.provider_name,
                 DailyProduct.city
@@ -363,13 +380,7 @@ class DailyRepo:
         )
 
     @staticmethod
-    def get_range(
-        db: Session,
-        start_date,
-        end_date,
-        provider_name=None,
-        city=None
-    ):
+    def get_range(db: Session, start_date, end_date, provider_name=None, city=None):
         q = db.query(DailyProduct).filter(
             DailyProduct.snapshot_date >= start_date,
             DailyProduct.snapshot_date <= end_date

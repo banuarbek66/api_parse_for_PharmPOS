@@ -1,29 +1,25 @@
 # schemas.py
 # ============================================================
-# SCHEMAS (Pydantic) ДЛЯ PHARM-POS SUPPLIER AGGREGATOR
+# Pydantic СХЕМЫ ДЛЯ PHARM-POS SUPPLIER AGGREGATOR
 # ============================================================
 
-from typing import List, Optional, Any
+from typing import List, Optional
 from datetime import datetime, date
 from pydantic import BaseModel
-
 from uuid import UUID
 
 
 # ============================================================
-# 1. МАППИНГ ПОСТАВЩИКА (supplier_mapping)
+# 1. Supplier Mapping
 # ============================================================
 
 class SupplierMappingBase(BaseModel):
     provider_name: str
     format: str = "json"
 
-    # путь до списка товаров
     items_path: Optional[str] = None
 
-    # путь до города (приходит в любом виде)
     city_path: Optional[str] = None
-
     city_in_params: bool = False
     city_in_body: bool = False
     city_in_headers: bool = False
@@ -31,7 +27,6 @@ class SupplierMappingBase(BaseModel):
     producer: Optional[str] = None
     producer_country: Optional[str] = None
 
-    # === НАШИ ПОЛЯ → ИХ КЛЮЧИ ===
     sku_uid: Optional[str] = None
     sku_name: Optional[str] = None
     sku_price: Optional[str] = None
@@ -39,14 +34,14 @@ class SupplierMappingBase(BaseModel):
 
     sku: Optional[str] = None
     sku_serial: Optional[str] = None
-    sku_barcodes: Optional[str] = None  # ключ от поставщика
+    sku_barcodes: Optional[str] = None
     sku_srok: Optional[str] = None
     sku_step: Optional[str] = None
     sku_marker: Optional[str] = None
     sku_pack: Optional[str] = None
     sku_box: Optional[str] = None
-    unit: Optional[str] = None
 
+    unit: Optional[str] = None
     min_order: Optional[str] = None
 
 
@@ -63,21 +58,17 @@ class SupplierMappingRead(SupplierMappingBase):
 
 
 # ============================================================
-# 2. ПОСТАВЩИК (suppliers)
+# 2. Supplier
 # ============================================================
 
 class SupplierBase(BaseModel):
-
     provider_name: str
     provider_bin: Optional[str] = None
 
-
-    # --- JSON URL ---
     json_url_get_price: Optional[str] = None
     json_url_get_address: Optional[str] = None
     json_url_get_order: Optional[str] = None
 
-    # --- XML URL ---
     xml_url_get_price: Optional[str] = None
     xml_url_get_address: Optional[str] = None
     xml_url_get_order: Optional[str] = None
@@ -86,7 +77,6 @@ class SupplierBase(BaseModel):
     password: Optional[str] = None
 
     city_param_name: Optional[str] = "city_id"
-
     is_active: bool = True
 
 
@@ -103,11 +93,10 @@ class SupplierRead(SupplierBase):
 
 
 # ============================================================
-# 3. ГОРОДА ПОСТАВЩИКОВ (supplier_cities)
+# 3. Supplier City
 # ============================================================
 
 class SupplierCityBase(BaseModel):
-
     provider_name: str
     supplier_city_code: str
     normalized_city: str
@@ -125,11 +114,10 @@ class SupplierCityRead(SupplierCityBase):
 
 
 # ============================================================
-# 4. ТОВАР ОТ ПОСТАВЩИКА (hourly / daily)
+# 4. Продукт (Hourly / Daily)
 # ============================================================
 
 class ProductBase(BaseModel):
-
     provider_name: str
     city: Optional[str] = None
     producer: Optional[str] = None
@@ -143,7 +131,6 @@ class ProductBase(BaseModel):
     sku: Optional[str] = None
     sku_serial: Optional[str] = None
 
-    # ✅ JSONB список
     sku_barcodes: Optional[List[str]] = None
 
     sku_srok: Optional[str] = None
@@ -151,14 +138,15 @@ class ProductBase(BaseModel):
     sku_marker: Optional[str] = None
     sku_pack: Optional[str] = None
     sku_box: Optional[str] = None
-    unit: Optional[str] = "упаковка"
 
+    unit: Optional[str] = "упаковка"
     min_order: Optional[str] = None
 
 
 class HourlyProductRead(ProductBase):
     id: UUID
     provider_id: UUID
+    provider_bin: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -168,6 +156,7 @@ class HourlyProductRead(ProductBase):
 class DailyProductRead(ProductBase):
     id: UUID
     provider_id: UUID
+    provider_bin: Optional[str] = None
     snapshot_date: date
     created_at: datetime
 
@@ -176,24 +165,21 @@ class DailyProductRead(ProductBase):
 
 
 # ============================================================
-# 5. ГЛАВНЫЙ АГРЕГИРОВАННЫЙ ОТВЕТ
+# 5. AggregatedItem
 # ============================================================
 
 class AggregatedItem(BaseModel):
-
     provider_name: str
     provider_bin: Optional[str] = None
-    
+
     city: Optional[str] = None
     producer: Optional[str] = None
-    producer_country: Optional[str] = None 
-
+    producer_country: Optional[str] = None
 
     sku_uid: Optional[str] = None
-    sku_name: Optional[str] = None  # ✅ НАЗВАНИЕ ТОВАРА
+    sku_name: Optional[str] = None
     sku_barcode: Optional[str] = None
 
-    sku_uid: Optional[str] = None
     sku_price: Optional[str] = None
     sku_stock: Optional[str] = None
 
@@ -201,9 +187,9 @@ class AggregatedItem(BaseModel):
     unit: Optional[str] = None
     min_order: Optional[str] = None
 
-    sku_serial: Optional[str] = None     # серия
-    sku_srok: Optional[str] = None       # срок годности
-    sku_marker: Optional[str] = None 
+    sku_serial: Optional[str] = None
+    sku_srok: Optional[str] = None
+    sku_marker: Optional[str] = None
 
     last_update: Optional[datetime] = None
 
@@ -215,11 +201,10 @@ class ProductByBarcodeResponse(BaseModel):
 
 
 # ============================================================
-# 6. РЕЗУЛЬТАТ СИНХРОНИЗАЦИИ
+# 6. Sync Result
 # ============================================================
 
 class SyncResult(BaseModel):
-
     provider_name: str
     processed: int
     status: str
@@ -228,7 +213,9 @@ class SyncResult(BaseModel):
     message: Optional[str] = None
 
 
-
+# ============================================================
+# 7. City Response
+# ============================================================
 
 class CityResponseCreate(BaseModel):
     provider_name: str
@@ -244,6 +231,10 @@ class CityResponseRead(CityResponseCreate):
     class Config:
         from_attributes = True
 
+
+# ============================================================
+# 8. Supplier Unit
+# ============================================================
 
 class SupplierUnitCreate(BaseModel):
     provider_name: str

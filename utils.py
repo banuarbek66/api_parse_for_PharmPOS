@@ -206,3 +206,33 @@ def normalize_city(value: Any) -> Optional[str]:
 
     # можно будет потом добавлять маппинг
     return value.lower()
+
+
+import re
+
+def clean_unit(raw: str | None) -> str | None:
+    """
+    Умная очистка unit:
+    - нижний регистр
+    - удаляем точки, запятые, лишние пробелы
+    - удаляем '1', цифры
+    - убираем 'шт/уп' → 'штуп' (чтобы потом сравнивать)
+    """
+    if not raw:
+        return None
+
+    val = str(raw).strip().lower()
+
+    # символы мусора
+    val = val.replace(".", "").replace(",", "").replace("(", "").replace(")", "")
+
+    # удаляем повторяющиеся пробелы
+    val = re.sub(r"\s+", " ", val).strip()
+
+    # убираем цифры "1 шт" → "шт"
+    val = re.sub(r"\d+", "", val).strip()
+
+    # заменяем разделители
+    val = val.replace("/", "").replace("\\", "")
+
+    return val

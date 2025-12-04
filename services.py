@@ -5,11 +5,14 @@
 
 import base64
 import json
-from datetime import datetime
+import re
+from datetime import datetime, time, timedelta
 from typing import List, Optional
+from collections import defaultdict
 
 import requests
 import xmltodict
+import chardet
 from sqlalchemy.orm import Session
 
 from core import (
@@ -31,12 +34,13 @@ from repositories import (
     HourlyRepo,
     DailyRepo,
     SupplierCityRepo,
+    SupplierUnitRepo,
+    CityResponseRepo,
 )
 
 from schemas import AggregatedItem, SupplierMappingCreate
-from utils import nested_get, normalize_barcode
+from utils import nested_get, normalize_barcode, clean_unit
 
-from repositories import CityResponseRepo
 # ============================================================
 # CITY SERVICE
 # ============================================================
@@ -45,42 +49,26 @@ class CityService:
 
     @staticmethod
     def extract_city_from_response(mapping: SupplierMapping, parsed_data: dict) -> Optional[str]:
-        """
-        Пытаемся получить город из ответа поставщика.
-        Приоритет:
-        1) city_path
-        2) поля city / City
-        3) params.city
-        """
-
         value = None
 
-        # 1. Через path
+        # 1) city_path
         if mapping.city_path:
             value = nested_get(parsed_data, mapping.city_path)
 
-        # 2. В корне
+        # 2) city / City
         if not value:
             value = parsed_data.get("city") or parsed_data.get("City")
 
-        # 3. В params если есть
+        # 3) params.city
         if not value and isinstance(parsed_data, dict):
             params = parsed_data.get("params")
             if isinstance(params, dict):
                 value = params.get("city")
 
-        if not value:
-            return None
-
-        return str(value).strip()
+        return str(value).strip() if value else None
 
     @staticmethod
-    def resolve_city(
-        db: Session,
-        provider_name: str,
-        city_code: Optional[str] = None,
-        city_name: Optional[str] = None,
-    ) -> str:
+    def resolve_city(db: Session, provider_name: str, city_code=None, city_name=None) -> str:
 
         city = CityResponseRepo.find_city(
             db=db,
@@ -95,28 +83,21 @@ class CityService:
             )
 
         return city.normalized_city
-    
 
-import chardet
-import re
+
 # ============================================================
 # FETCH SERVICE
 # ============================================================
+
 class FetchService:
 
     @staticmethod
-    def fetch(
-        url: str,
-        login: str | None = None,
-        password: str | None = None
-    ) -> str:
+    def fetch(url: str, login: str | None = None, password: str | None = None) -> str:
 
-        if not url.startswith("http://") and not url.startswith("https://"):
+        if not url.startswith(("http://", "https://")):
             url = "http://" + url
 
-        headers = {
-            "User-Agent": "PharmPOS/1.0"
-        }
+        headers = {"User-Agent": "PharmPOS/1.0"}
 
         if login and password:
             raw = f"{login}:{password}".encode("utf-8")
@@ -130,39 +111,39 @@ class FetchService:
         )
         response.raise_for_status()
 
-        raw = response.content
+        raw_bytes = response.content
+        encoding = chardet.detect(raw_bytes).get("encoding") or "utf-8"
 
-        # Определяем кодировку
-        detected = chardet.detect(raw)
-        encoding = detected.get("encoding") or "utf-8"
+        def looks_broken(txt: str) -> bool:
+            bad = ["Ð", "Ñ", "â", "€", "", ""]
+            return sum(1 for p in bad if p in txt) >= 2
 
-        # Функция для определения крокозябр
-        def looks_broken(text: str) -> bool:
-            patterns = ["Ð", "Ñ", "â", "€", "", ""]
-            count = sum(1 for p in patterns if p in text)
-            return count >= 2
-
-        # ШАГ 1 — пробуем autodetect
+        # autodetect
         try:
-            text = raw.decode(encoding, errors="strict")
-            if not looks_broken(text):
-                return text
+            txt = raw_bytes.decode(encoding, errors="strict")
+            if not looks_broken(txt):
+                return txt
         except:
             pass
 
-        # ШАГ 2 — пробуем CP1251 принудительно
+        # cp1251
         try:
-            text = raw.decode("cp1251", errors="strict")
-            if not looks_broken(text):
-                return text
+            txt = raw_bytes.decode("cp1251", errors="strict")
+            if not looks_broken(txt):
+                return txt
         except:
             pass
 
-        # ШАГ 3 — fallback latin-1
-        return raw.decode("latin-1", errors="ignore")
+        # fallback
+        return raw_bytes.decode("latin-1", errors="ignore")
+
 
 # ============================================================
 # PARSE SERVICE
+# ============================================================
+
+# ============================================================
+# PARSE SERVICE — FINAL VERSION
 # ============================================================
 
 class ParseService:
@@ -189,47 +170,51 @@ class ParseService:
                 return None
             return item.get(key)
 
-        # Приводим штрихкод к валидному списку
+        # BARCODE NORMALIZATION
         raw_barcodes = get_value(mapping.sku_barcodes)
         barcodes = [
             b for b in normalize_barcode(raw_barcodes)
             if b and len(str(b)) >= 6
         ]
 
-        # === sku_step: жёстко приводим к 1, если 0 / None / мусор ===
+        # STEP
         raw_step = get_value(mapping.sku_step)
-
         step_value = 1
         if raw_step not in (None, "", "0", 0):
             try:
                 iv = int(str(raw_step).replace(",", "."))
                 if iv > 0:
                     step_value = iv
-            except Exception:
+            except:
                 step_value = 1
 
+        # UNIT — ТОЛЬКО СЫРОЕ ЗНАЧЕНИЕ ИЗ АПИ
+        raw_unit = get_value(mapping.unit)
+
         return {
-            "sku_uid":      get_value(mapping.sku_uid),
-            "sku_name":     get_value(mapping.sku_name),
-            "sku_price":    get_value(mapping.sku_price),
-            "sku_stock":    get_value(mapping.sku_stock),
+            "sku_uid": get_value(mapping.sku_uid),
+            "sku_name": get_value(mapping.sku_name),
+            "sku_price": get_value(mapping.sku_price),
+            "sku_stock": get_value(mapping.sku_stock),
 
-            "sku":          get_value(mapping.sku),
-            "sku_serial":   get_value(mapping.sku_serial),
+            "sku": get_value(mapping.sku),
+            "sku_serial": get_value(mapping.sku_serial),
+
             "sku_barcodes": barcodes,
+            "sku_srok": get_value(mapping.sku_srok),
+            "sku_step": str(step_value),
+            "sku_marker": get_value(mapping.sku_marker),
+            "sku_pack": get_value(mapping.sku_pack),
+            "sku_box": get_value(mapping.sku_box),
 
-            "sku_srok":     get_value(mapping.sku_srok),
-            "sku_step":     str(step_value),                   # 👈 уже нормализовано
-            "sku_marker":   get_value(mapping.sku_marker),
-            "sku_pack":     get_value(mapping.sku_pack),
-            "sku_box":      get_value(mapping.sku_box),
+            "unit": raw_unit,  # ← ТОЛЬКО СЫРОЙ ЮНИТ, нормализация в SyncService
+            "min_order": get_value(mapping.min_order),
 
-            "unit":         get_value(mapping.unit),           # 👈 НОВОЕ
-
-            "min_order":        get_value(mapping.min_order),
-            "producer":         get_value(mapping.producer),
+            "producer": get_value(mapping.producer),
             "producer_country": get_value(mapping.producer_country),
         }
+
+
     @staticmethod
     def get_items_by_path(data: dict, path: Optional[str]) -> List[dict]:
 
@@ -261,7 +246,6 @@ class ParseService:
 
         return []
 
-from repositories import SupplierUnitRepo
 
 # ============================================================
 # SYNC SERVICE
@@ -269,30 +253,43 @@ from repositories import SupplierUnitRepo
 
 class SyncService:
 
+    DEFAULT_UNIT = "778"  # упаковка
+
     @staticmethod
-    def _select_price_url(
-        supplier: Supplier,
-        mapping: SupplierMapping
-    ) -> Optional[str]:
+    def _apply_unit_normalization(db: Session, provider: str, raw_unit: str | None) -> str:
+        """
+        Логика нормализации:
+        1) Если unit пуст → default 778
+        2) Если есть точное совпадение в supplier_units → normalized_unit
+        3) Если нет → default 778
+        """
+        if not raw_unit:
+            return SyncService.DEFAULT_UNIT
+
+        fixed = SupplierUnitRepo.find(db, provider, raw_unit)
+
+        if fixed:
+            return fixed.normalized_unit
+
+        return SyncService.DEFAULT_UNIT
+
+    @staticmethod
+    def _select_price_url(supplier: Supplier, mapping: SupplierMapping) -> Optional[str]:
 
         fmt = (mapping.format or "").lower().strip()
 
         if fmt == "json":
             return supplier.json_url_get_price
-
         if fmt == "xml":
             return supplier.xml_url_get_price
 
         return None
 
     # ------------------------------------------------------------
-    # ОСНОВНАЯ СИНХРОНИЗАЦИЯ ОДНОГО ПОСТАВЩИКА (с нормализацией unit)
+    # MAIN SYNC
     # ------------------------------------------------------------
     @staticmethod
-    def sync_single_supplier(
-        db: Session,
-        supplier: Supplier
-    ) -> dict:
+    def sync_single_supplier(db: Session, supplier: Supplier) -> dict:
 
         mapping = MappingRepo.get_by_provider(db, supplier.provider_name)
 
@@ -309,15 +306,15 @@ class SyncService:
             return {
                 "provider": supplier.provider_name,
                 "status": "failed",
-                "message": "URL not found for selected format"
+                "message": "URL not found"
             }
 
-        results: List[dict] = []
+        results = []
         total_products = 0
 
-        # =========================================================
-        # СЦЕНАРИЙ 1: Goрода задаются через params (city_in_params = True)
-        # =========================================================
+        # ============================================================
+        # 1) MULTI-CITY MODE
+        # ============================================================
         if mapping.city_in_params:
 
             cities = (
@@ -330,43 +327,49 @@ class SyncService:
                 return {
                     "provider": supplier.provider_name,
                     "status": "error",
-                    "message": "No cities in CityResponse for supplier"
+                    "message": "No cities registered"
                 }
 
             for city in cities:
-                # Подстановка города
+
                 if "{city}" in base_url:
                     url = base_url.format(city=city.supplier_city_code)
                 else:
-                    param_name = getattr(supplier, "city_param_name", None) or "city_id"
+                    param = supplier.city_param_name or "city_id"
                     sep = "&" if "?" in base_url else "?"
-                    url = f"{base_url}{sep}{param_name}={city.supplier_city_code}"
+                    url = f"{base_url}{sep}{param}={city.supplier_city_code}"
 
                 try:
-                    raw_text = FetchService.fetch(url, supplier.login, supplier.password)
-                    parsed_data = ParseService.parse(raw_text, mapping.format)
-                    items = ParseService.get_items_by_path(parsed_data, mapping.items_path)
+                    raw = FetchService.fetch(url, supplier.login, supplier.password)
+                    parsed = ParseService.parse(raw, mapping.format)
+                    items = ParseService.get_items_by_path(parsed, mapping.items_path)
 
-                    objects: List[HourlyProduct] = []
+                    objects = []
 
-                    for item in items[:MAX_PRODUCTS_PER_PROVIDER]:
-                        normalized = ParseService.normalize(item, mapping)
+                    for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
 
-                        # 🔥 UNIT NORMALIZATION
+                        normalized = ParseService.normalize(it, mapping)
+
+                        # --- UNIT NORMALIZATION ---
                         raw_unit = normalized.get("unit")
                         if raw_unit:
-                            fixed = SupplierUnitRepo.find(db, supplier.provider_name, raw_unit)
+                            fixed = SupplierUnitRepo.find(
+                                db,
+                                supplier.provider_name,
+                                raw_unit
+                            )
                             if fixed:
                                 normalized["unit"] = fixed.normalized_unit
 
-                        product = HourlyProduct(
-                            provider_id=supplier.id,
-                            provider_name=supplier.provider_name,
-                            city=city.normalized_city,
-                            **normalized,
+                        objects.append(
+                            HourlyProduct(
+                                provider_id=supplier.id,
+                                provider_name=supplier.provider_name,
+                                provider_bin=supplier.provider_bin,
+                                city=city.normalized_city,
+                                **normalized
+                            )
                         )
-
-                        objects.append(product)
 
                     if objects:
                         HourlyRepo.bulk_create(db, objects)
@@ -378,7 +381,7 @@ class SyncService:
                         "supplier_city_code": city.supplier_city_code,
                         "processed": len(objects),
                         "status": "success",
-                        "url": url,
+                        "url": url
                     })
 
                 except Exception as e:
@@ -387,74 +390,72 @@ class SyncService:
                         "supplier_city_code": city.supplier_city_code,
                         "status": "error",
                         "message": str(e),
-                        "url": url,
+                        "url": url
                     })
 
-        # =========================================================
-        # СЦЕНАРИЙ 2: Город приходит из BODY/XML/JSON
-        # =========================================================
+        # ============================================================
+        # 2) SINGLE CITY MODE
+        # ============================================================
         else:
+
             try:
-                raw_text = FetchService.fetch(
-                    base_url,
-                    supplier.login,
-                    supplier.password
-                )
+                raw = FetchService.fetch(base_url, supplier.login, supplier.password)
+                parsed = ParseService.parse(raw, mapping.format)
 
-                parsed_data = ParseService.parse(raw_text, mapping.format)
-
-                city_value = CityService.extract_city_from_response(
-                    mapping,
-                    parsed_data
-                )
-
+                city_raw = CityService.extract_city_from_response(mapping, parsed)
                 city = CityService.resolve_city(
                     db=db,
                     provider_name=supplier.provider_name,
-                    city_code=city_value,
-                    city_name=city_value,
+                    city_code=city_raw,
+                    city_name=city_raw,
                 )
 
-                items = ParseService.get_items_by_path(parsed_data, mapping.items_path)
+                items = ParseService.get_items_by_path(parsed, mapping.items_path)
 
-                objects: List[HourlyProduct] = []
+                objects = []
 
-                for item in items[:MAX_PRODUCTS_PER_PROVIDER]:
-                    normalized = ParseService.normalize(item, mapping)
+                for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
 
-                    # 🔥 UNIT NORMALIZATION
+                    normalized = ParseService.normalize(it, mapping)
+
+                    # --- UNIT NORMALIZATION ---
                     raw_unit = normalized.get("unit")
                     if raw_unit:
-                        fixed = SupplierUnitRepo.find(db, supplier.provider_name, raw_unit)
+                        fixed = SupplierUnitRepo.find(
+                            db,
+                            supplier.provider_name,
+                            raw_unit
+                        )
                         if fixed:
                             normalized["unit"] = fixed.normalized_unit
 
-                    product = HourlyProduct(
-                        provider_id=supplier.id,
-                        provider_name=supplier.provider_name,
-                        city=city,
-                        **normalized,
+                    objects.append(
+                        HourlyProduct(
+                            provider_id=supplier.id,
+                            provider_name=supplier.provider_name,
+                            provider_bin=supplier.provider_bin,
+                            city=city,
+                            **normalized
+                        )
                     )
-
-                    objects.append(product)
 
                 if objects:
                     HourlyRepo.bulk_create(db, objects)
 
-                total_products = len(objects)
+                total_products += len(objects)
 
                 results.append({
                     "city": city,
                     "processed": len(objects),
                     "status": "success",
-                    "url": base_url,
+                    "url": base_url
                 })
 
             except Exception as e:
                 return {
                     "provider": supplier.provider_name,
                     "status": "error",
-                    "message": str(e),
+                    "message": str(e)
                 }
 
         return {
@@ -465,31 +466,24 @@ class SyncService:
             "details": results,
         }
 
-    # ------------------------------------------------------------
-    @staticmethod
-    def run_hourly_sync(db: Session) -> List[dict]:
-        results: List[dict] = []
-        for supplier in SupplierRepo.get_active(db):
-            result = SyncService.sync_single_supplier(db, supplier)
-            results.append(result)
-        return results
 
     # ------------------------------------------------------------
     @staticmethod
     def run_daily_snapshot(db: Session) -> int:
 
         hourly = HourlyRepo.get_all(db)
-        daily: List[DailyProduct] = []
+        daily = []
 
         for item in hourly:
             daily.append(
                 DailyProduct(
-                    producer=item.producer,
-                    producer_country=item.producer_country,
-
                     provider_id=item.provider_id,
                     provider_name=item.provider_name,
+                    provider_bin=item.provider_bin,
                     city=item.city,
+
+                    producer=item.producer,
+                    producer_country=item.producer_country,
 
                     sku_uid=item.sku_uid,
                     sku_name=item.sku_name,
@@ -506,10 +500,10 @@ class SyncService:
                     sku_pack=item.sku_pack,
                     sku_box=item.sku_box,
 
-                    unit=item.unit,  # 🔥 уже нормализован
-
+                    unit=item.unit,
                     min_order=item.min_order,
-                    snapshot_date=datetime.utcnow().date(),
+
+                    snapshot_date=datetime.utcnow().date()
                 )
             )
 
@@ -517,16 +511,46 @@ class SyncService:
             DailyRepo.bulk_create(db, daily)
 
         return len(daily)
+    @staticmethod
+    def run_hourly_sync(db):
+        """
+        Главный метод почасовой синхронизации.
+        Вызывается CRON-ом или scheduler'ом.
+        """
+        suppliers = SupplierRepo.get_active(db)
 
-    # ------------------------------------------------------------
+        if not suppliers:
+            return {"status": "error", "message": "No active suppliers"}
+
+        # Очистка HOURLY перед новым запуском
+        HourlyRepo.clear_table(db)
+
+        results = []
+        total = 0
+
+        for supplier in suppliers:
+            try:
+                res = SyncService.sync_single_supplier(db, supplier)
+                results.append(res)
+                total += res.get("total_products", 0)
+            except Exception as e:
+                results.append({
+                    "provider": supplier.provider_name,
+                    "status": "error",
+                    "message": str(e)
+                })
+
+        return {
+            "status": "success",
+            "total_suppliers": len(suppliers),
+            "total_products": total,
+            "details": results
+        }
+
     @staticmethod
     def cleanup_hourly_table(db: Session) -> bool:
         HourlyRepo.clear_table(db)
         return True
-
-
-  
-
 
 
 # ============================================================
@@ -536,62 +560,52 @@ class SyncService:
 class ProductService:
 
     @staticmethod
-    def get_by_barcode(
-        db: Session,
-        barcode: str,
-        city: Optional[str] = None
-    ) -> List[AggregatedItem]:
+    def get_by_barcode(db: Session, barcode: str, city: Optional[str] = None) -> List[AggregatedItem]:
 
+        # 1) HOURLY
         items = HourlyRepo.get_latest_by_barcode(db, barcode, city=city)
 
+        # 2) DAILY fallback
         if not items:
             items = DailyRepo.get_latest_by_barcode(db, barcode, city=city)
 
-        result: List[AggregatedItem] = []
+        result = []
 
         for item in items:
 
-            matched_barcode = None
-
+            matched = None
             if item.sku_barcodes:
                 for b in item.sku_barcodes:
                     if str(b).strip() == str(barcode).strip():
-                        matched_barcode = b
+                        matched = b
                         break
 
-            # если вдруг не совпало — не пускаем в ответ
-            if not matched_barcode:
+            if not matched:
                 continue
 
             result.append(
                 AggregatedItem(
                     provider_name=item.provider_name,
-
+                    provider_bin=item.provider_bin,
                     city=item.city,
-                    producer=getattr(item, "producer", None),
-                    producer_country=getattr(item, "producer_country", None),
-
+                    producer=item.producer,
+                    producer_country=item.producer_country,
                     sku_uid=item.sku_uid,
                     sku_name=item.sku_name,
-                    sku_barcode=matched_barcode,
-
+                    sku_barcode=matched,
                     sku_price=item.sku_price,
                     sku_stock=item.sku_stock,
                     sku_step=item.sku_step,
+                    unit=item.unit,
                     min_order=item.min_order,
-
-                    # 🔹 добавляем серия / срок / маркер
-                    sku_serial=getattr(item, "sku_serial", None),
-                    sku_srok=getattr(item, "sku_srok", None),
-                    sku_marker=getattr(item, "sku_marker", None),
-
-                    last_update=item.created_at,
+                    sku_serial=item.sku_serial,
+                    sku_srok=item.sku_srok,
+                    sku_marker=item.sku_marker,
+                    last_update=item.created_at
                 )
             )
 
         return result
-
-
 
 
 # ============================================================
@@ -601,10 +615,7 @@ class ProductService:
 class SupplierMappingService:
 
     @staticmethod
-    def create_mapping(
-        db: Session,
-        mapping_data: SupplierMappingCreate
-    ) -> dict:
+    def create_mapping(db: Session, mapping_data: SupplierMappingCreate) -> dict:
 
         mapping = SupplierMapping(**mapping_data.dict())
         db.add(mapping)
@@ -627,37 +638,17 @@ class SupplierMappingService:
             "mapping_id": str(mapping.id),
             "sync_result": result,
         }
-    
 
 
 # ============================================================
 # UNIVERSAL ANALYTICS SERVICE — DAILY / WEEKLY / MONTHLY
 # ============================================================
 
-from datetime import datetime, time, timedelta
-from collections import defaultdict
-
-from datetime import datetime, time, timedelta
-from collections import defaultdict
-from typing import Optional
-
-from datetime import datetime, time, timedelta
-from collections import defaultdict
-from typing import Optional
-from sqlalchemy.orm import Session
-
 class AnalyticsService:
 
     # ------------------------------------------------------------
     @staticmethod
     def get_period_bounds(period: str, start_date=None, end_date=None):
-        """
-        Периоды:
-        today  → с 01:00 сегодня
-        week   → -7 дней
-        month  → -30 дней
-        custom → переданные даты
-        """
 
         now = datetime.utcnow()
 
@@ -678,7 +669,7 @@ class AnalyticsService:
                 raise ValueError("Custom period requires start_date and end_date")
             return start_date, end_date
 
-        raise ValueError(f"Unknown period type: {period}")
+        raise ValueError(f"Unknown period: {period}")
 
     # ------------------------------------------------------------
     @staticmethod
@@ -693,9 +684,8 @@ class AnalyticsService:
     ) -> dict:
 
         start_dt, end_dt = AnalyticsService.get_period_bounds(period, start_date, end_date)
-        now = datetime.utcnow()
 
-        # Подключаем Hourly только если период захватывает сегодня
+        now = datetime.utcnow()
         include_hourly = start_dt.date() <= now.date()
 
         hourly = []
@@ -709,7 +699,6 @@ class AnalyticsService:
                 city=city
             )
 
-        # Daily — для всех прошлых дней
         daily = DailyRepo.get_range(
             db=db,
             start_date=start_dt.date(),
@@ -718,85 +707,45 @@ class AnalyticsService:
             city=city
         )
 
-        # Нет данных — вернуть пустой ответ
         if not hourly and not daily:
-            return {
-                "status": "empty",
-                "message": "No data found for requested period",
-                "items": []
-            }
-
-        # ------------------------------------------------------------
-        # Собираем совмещённые данные
-        # ------------------------------------------------------------
+            return {"status": "empty", "items": []}
 
         combined = defaultdict(list)
 
-        # DAILY
+        # ---- DAILY ----
         for d in daily:
-            key = (d.provider_name, d.city, d.sku_uid)
-            combined[key].append((
-                d.snapshot_date,     # date
-                d.sku_stock,
-                d.sku_name,
-                d.sku_barcodes,
-                "daily"
-            ))
+            combined[(d.provider_name, d.city, d.sku_uid)].append(
+                (d.snapshot_date, d.sku_stock, d.sku_name, d.sku_barcodes, "daily")
+            )
 
-        # HOURLY
+        # ---- HOURLY ----
         for h in hourly:
-            key = (h.provider_name, h.city, h.sku_uid)
-            combined[key].append((
-                h.created_at,        # datetime
-                h.sku_stock,
-                h.sku_name,
-                h.sku_barcodes,
-                "hourly"
-            ))
+            combined[(h.provider_name, h.city, h.sku_uid)].append(
+                (h.created_at, h.sku_stock, h.sku_name, h.sku_barcodes, "hourly")
+            )
 
-        # ------------------------------------------------------------
-        # Обработка данных
-        # ------------------------------------------------------------
-
+        # Process
         hot = []
 
-        def to_number(value):
-            """Безопасное преобразование остатков."""
-            if value is None:
-                return 0
+        def to_num(val):
             try:
-                return float(value)
+                return float(val)
             except:
                 return 0
 
         for (provider, city_, sku_uid), entries in combined.items():
 
-            # --- 1. Нормализуем date → datetime ---
-            normalized_entries = []
-            for t, stock, name, barcodes, src in entries:
+            normalized = []
+            for t, stock, name, bc, src in entries:
                 if isinstance(t, datetime):
-                    normalized_entries.append((t, stock, name, barcodes, src))
+                    normalized.append((t, stock, name, bc))
                 else:
-                    # t — datetime.date → превращаем в datetime
-                    normalized_entries.append((
-                        datetime.combine(t, time.min),
-                        stock,
-                        name,
-                        barcodes,
-                        src
-                    ))
+                    normalized.append((datetime.combine(t, time.min), stock, name, bc))
 
-            entries = normalized_entries
+            entries = sorted(normalized, key=lambda x: x[0])
 
-            # --- 2. Сортируем по времени ---
-            entries.sort(key=lambda x: x[0])
-
-            # --- 3. Выбираем начало/конец периода ---
-            start_stock = to_number(entries[0][1])
-            end_stock = to_number(entries[-1][1])
-
-            sku_name = entries[-1][2]
-            sku_barcodes = entries[-1][3]
+            start_stock = to_num(entries[0][1])
+            end_stock = to_num(entries[-1][1])
 
             if start_stock <= 0:
                 continue
@@ -811,15 +760,14 @@ class AnalyticsService:
                 "provider_name": provider,
                 "city": city_,
                 "sku_uid": sku_uid,
-                "sku_name": sku_name,
-                "sku_barcodes": sku_barcodes,
+                "sku_name": entries[-1][2],
+                "sku_barcodes": entries[-1][3],
                 "start_stock": start_stock,
                 "end_stock": end_stock,
                 "sold": sold,
                 "percent": percent
             })
 
-        # --- 4. Сортировка по убыванию ---
         hot.sort(key=lambda x: (x["percent"], x["sold"]), reverse=True)
 
         return {
