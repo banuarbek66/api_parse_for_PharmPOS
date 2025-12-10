@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from deps import get_db
-from services import SyncService
+from services import SyncService, PostProcessService
 from repositories import SupplierRepo
 
 router = APIRouter(prefix="/sync", tags=["Sync"])
@@ -69,3 +69,9 @@ def cleanup(db: Session = Depends(get_db)):
         "status": "cleaned",
         "message": "hourly_products table cleared"
     }
+
+@router.post("/run", summary="Postprocess hourly products")
+def run_postprocess(
+    db: Session = Depends(get_db),
+):
+    return PostProcessService.rebuild_all(db)

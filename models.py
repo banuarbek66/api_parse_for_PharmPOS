@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Text,
+    Numeric
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -230,5 +231,65 @@ class SupplierUnit(Base):
     provider_name: Mapped[str] = mapped_column(String(100), index=True)
     supplier_unit: Mapped[str] = mapped_column(String(100), index=True)
     normalized_unit: Mapped[str] = mapped_column(String(100), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# models.py
+
+class ProductCompare(Base):
+    __tablename__ = "product_compare"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # 🔑 Связь СТРОГО по баркоду
+    barcode: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+
+    # Для удобства поиска / отображения
+    sku_name: Mapped[str | None] = mapped_column(String(500))
+
+    # 💰 Цены — СТРОКИ (ОЧЕНЬ ВАЖНО)
+    price_atamiras: Mapped[str | None] = mapped_column(String(500))
+    price_medservice: Mapped[str | None] = mapped_column(String(500))
+    price_stopharm: Mapped[str | None] = mapped_column(String(500))
+    price_amanat: Mapped[str | None] = mapped_column(String(500))
+    price_rauza: Mapped[str | None] = mapped_column(String(500))
+
+    def __repr__(self):
+        return f"<ProductCompare {self.barcode}>"
+
+
+class ProductCanonical(Base):
+    __tablename__ = "product_canonical"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    # один "главный" баркод (можно самый частый или "корректный" EAN)
+    canonical_barcode: Mapped[str | None] = mapped_column(String(255), index=True)
+
+    # нормализованное имя (см. ниже)
+    name_key: Mapped[str | None] = mapped_column(String(500), index=True)
+
+    # опционально – производитель
+    producer: Mapped[str | None] = mapped_column(String(255), index=True)
+    producer_country: Mapped[str | None] = mapped_column(String(255))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BarcodeAlias(Base):
+    __tablename__ = "barcode_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    provider_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    barcode: Mapped[str] = mapped_column(String(255), index=True)
+
+    # к какому каноническому товару относится
+    canonical_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_canonical.id"), nullable=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

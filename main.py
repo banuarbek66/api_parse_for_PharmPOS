@@ -17,7 +17,7 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-
+from database import engine 
 
 from tasks.scheduler import start_scheduler
 from v1.router import router as v1_router
@@ -66,3 +66,31 @@ def root():
         "docs": "/docs",
         "version": "1.0.0"
     }
+
+
+from sqladmin import Admin
+
+
+from views import (
+    SupplierAdmin,
+    SupplierMappingAdmin,
+    CityResponseAdmin,
+    SupplierUnitAdmin,
+    HourlyProductAdmin,
+    DailyProductAdmin,
+    ProductCompareAdmin,
+)
+
+
+
+# ✅ ADMIN
+admin = Admin(app, engine)
+
+# ---- REGISTRATION OF ADMIN VIEWS ----
+admin.add_view(SupplierAdmin)
+admin.add_view(SupplierMappingAdmin)
+admin.add_view(CityResponseAdmin)
+admin.add_view(SupplierUnitAdmin)
+admin.add_view(HourlyProductAdmin)
+admin.add_view(DailyProductAdmin)
+admin.add_view(ProductCompareAdmin)

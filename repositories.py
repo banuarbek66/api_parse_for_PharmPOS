@@ -17,6 +17,8 @@ from models import (
     SupplierCity,
     CityResponse,
     SupplierUnit,
+    ProductCanonical,
+    BarcodeAlias,
 )
 
 from utils import clean_unit
@@ -393,3 +395,85 @@ class DailyRepo:
             q = q.filter(DailyProduct.city == city)
 
         return q.all()
+
+
+# ============================================================
+# PRODUCT CANONICAL REPO
+# ============================================================
+from sqlalchemy import select
+from typing import Tuple, Dict, Iterable
+from sqlalchemy.dialects.postgresql import insert
+class ProductCanonicalRepo:
+
+    @staticmethod
+    def preload_all(db: Session) -> Dict[Tuple[str, Optional[str]], int]:
+        """
+        ⚡ Загружаем ВСЕ канонические товары в память
+        key = (name_key, producer)
+        value = canonical_id
+        """
+        rows = db.execute(
+            select(
+                ProductCanonical.id,
+                ProductCanonical.name_key,
+                ProductCanonical.producer,
+            )
+        ).all()
+
+        return {
+            (r.name_key, r.producer): r.id
+            for r in rows
+            if r.name_key
+        }
+
+    @staticmethod
+    def bulk_create(
+        db: Session,
+        items: Iterable[dict],
+    ) -> None:
+        """
+        items = [{
+            canonical_barcode,
+            name_key,
+            producer,
+            producer_country
+        }]
+        """
+        if not items:
+            return
+
+        db.bulk_insert_mappings(ProductCanonical, list(items))
+
+# ============================================================
+# BARCODE ALIAS REPO
+# ============================================================
+
+class BarcodeAliasRepo:
+
+    @staticmethod
+    def preload_all(db: Session) -> Dict[str, int]:
+        """
+        ⚡ barcode -> canonical_id
+        """
+        rows = db.execute(
+            select(
+                BarcodeAlias.barcode,
+                BarcodeAlias.canonical_id,
+            )
+        ).all()
+
+        return {r.barcode: r.canonical_id for r in rows}
+    @staticmethod
+    def bulk_create(db: Session, rows: list[dict]) -> None:
+        rows = [r for r in rows if r["canonical_id"] is not None]
+
+        if not rows:
+            return
+
+        db.execute(
+            insert(BarcodeAlias)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=["barcode"])
+        )
+
+        
