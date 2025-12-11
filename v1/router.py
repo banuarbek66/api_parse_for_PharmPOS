@@ -10,7 +10,7 @@ import v1.health
 import v1.cities
 import v1.analytics
 import v1.units
-
+import v1.supplier_srok
 
 
 router = APIRouter(prefix="/v1")
@@ -23,3 +23,5 @@ router.include_router(v1.health.router, tags=["Health"])
 router.include_router(v1.cities.router, tags=['city-response'])
 router.include_router(v1.units.router, tags=["Units"])
 router.include_router(v1.analytics.router, tags=["Analytics"])
+
+router.include_router(v1.supplier_srok.router, tags=['Supplier Srok Normalizations'])

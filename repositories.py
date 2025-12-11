@@ -19,6 +19,7 @@ from models import (
     SupplierUnit,
     ProductCanonical,
     BarcodeAlias,
+    SupplierSrokResponse,
 )
 
 from utils import clean_unit
@@ -475,5 +476,19 @@ class BarcodeAliasRepo:
             .values(rows)
             .on_conflict_do_nothing(index_elements=["barcode"])
         )
+   
 
-        
+class SupplierSrokRepo:
+
+    @staticmethod
+    def get_by_provider(db: Session, provider_name: str) -> SupplierSrokResponse | None:
+        """
+        Возвращает конфигурацию формата срока для поставщика.
+        Ожидается, что в таблице ОДНА строка на provider_name,
+        где provider_srok_raw = маска, например 'yyyymmdd'.
+        """
+        return (
+            db.query(SupplierSrokResponse)
+            .filter(SupplierSrokResponse.provider_name == provider_name)
+            .first()
+        )

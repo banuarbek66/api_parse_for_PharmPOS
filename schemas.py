@@ -251,3 +251,32 @@ class SupplierUnitOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
+
+class SupplierSrokBase(BaseModel):
+    provider_name: str
+    provider_srok_raw: str
+
+
+class SupplierSrokCreate(SupplierSrokBase):
+    pass
+
+
+class SupplierSrokUpdate(BaseModel):
+    provider_srok_raw: Optional[str] = None
+
+
+class SupplierSrokResponseSchema(BaseModel):
+    id: int
+    provider_name: str
+    provider_srok_raw: str
+    normalized_srok: Optional[str]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True

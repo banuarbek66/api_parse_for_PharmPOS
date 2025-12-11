@@ -8,6 +8,7 @@ from models import (
     HourlyProduct,
     DailyProduct,
     ProductCompare,
+    SupplierSrokResponse
 )
 
 # ============================================================
@@ -231,6 +232,7 @@ class ProductCompareAdmin(ModelView, model=ProductCompare):
         ProductCompare.price_stopharm,
         ProductCompare.price_amanat,
         ProductCompare.price_rauza,
+        
     ]
 
     column_searchable_list = [
@@ -250,3 +252,17 @@ class ProductCompareAdmin(ModelView, model=ProductCompare):
     can_create = False
     can_edit = False
     can_delete = False
+
+
+class SupllierSrokAdmin(ModelView, model=SupplierSrokResponse):
+    name='Suplier Srok'
+    column_list = [
+        SupplierSrokResponse.provider_name,
+        SupplierSrokResponse.provider_srok_raw,
+        SupplierSrokResponse.normalized_srok,
+    ]
+    form_columns=[
+        SupplierSrokResponse.provider_name,
+        SupplierSrokResponse.provider_srok_raw,
+        SupplierSrokResponse.normalized_srok,
+    ]

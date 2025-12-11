@@ -293,3 +293,26 @@ class BarcodeAlias(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+from sqlalchemy import Integer
+class SupplierSrokResponse(Base):
+    __tablename__ = "supplier_srok_response"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    provider_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
+    provider_srok_raw: Mapped[str] = mapped_column(String(50), nullable=False)
+    # например:
+    # "12.2025"
+    # "31.12.25"
+    # "DEC 2025"
+    # "2026-01-15"
+
+    normalized_srok: Mapped[str] = mapped_column(String(50), nullable=True)
+    # например:
+    # "2025-12"
+    # "2025-12-31"
+
+    

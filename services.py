@@ -45,11 +45,43 @@ from repositories import (
     CityResponseRepo,
     ProductCanonicalRepo,
     BarcodeAliasRepo,
+    SupplierSrokRepo
 )
 
 from schemas import AggregatedItem, SupplierMappingCreate
-from utils import nested_get, normalize_barcode, clean_unit, normalize_name
+from utils import nested_get, normalize_barcode, clean_unit, normalize_name, normalize_srok
 from database import SessionLocal
+
+
+from datetime import date
+
+
+class SupplierSrokService:
+    """
+    Работает по логике:
+    - в supplier_srok_response хранится маска для поставщика (например 'yyyymmdd')
+    - сюда приходит реальный срок от API (например '20261031')
+    - мы нормализуем его в 'dd-mm-yyyy' через normalize_srok(raw, pattern)
+    """
+
+    @staticmethod
+    def resolve_srok(
+        db: Session,
+        provider_name: str,
+        provider_srok_raw: str | None,
+    ) -> str | None:
+
+        if not provider_srok_raw:
+            return None
+
+        config = SupplierSrokRepo.get_by_provider(db, provider_name)
+        if not config:
+            # если формат не настроен — отдаём как есть
+            return provider_srok_raw
+
+        pattern = config.provider_srok_raw  # например 'yyyymmdd'
+        return normalize_srok(provider_srok_raw, pattern)
+
 
 def sanitize_xml(raw: str) -> str:
     end_tag = "</root>"
@@ -212,7 +244,6 @@ class ParseService:
             return json.loads(raw)
 
         if fmt == "xml":
-            
             return xmltodict.parse(raw)
 
         raise ValueError(f"Unsupported format: {data_format}")
@@ -245,8 +276,13 @@ class ParseService:
             except Exception:
                 step_value = 1
 
-        # UNIT — ТОЛЬКО СЫРОЕ ЗНАЧЕНИЕ ИЗ АПИ
+        # RAW UNIT
         raw_unit = get_value(mapping.unit)
+
+        # RAW SROK (срок годности — только сырое значение)
+        raw_srok = get_value(mapping.sku_srok)
+        if isinstance(raw_srok, str):
+            raw_srok = raw_srok.strip()
 
         return {
             "sku_uid": get_value(mapping.sku_uid),
@@ -258,13 +294,13 @@ class ParseService:
             "sku_serial": get_value(mapping.sku_serial),
 
             "sku_barcodes": barcodes,
-            "sku_srok": get_value(mapping.sku_srok),
+            "sku_srok": raw_srok,  # ← ТОЛЬКО RAW, нормализация делается в SyncService
             "sku_step": str(step_value),
             "sku_marker": get_value(mapping.sku_marker),
             "sku_pack": get_value(mapping.sku_pack),
             "sku_box": get_value(mapping.sku_box),
 
-            "unit": raw_unit,  # ← ТОЛЬКО СЫРОЙ ЮНИТ, нормализация в SyncService
+            "unit": raw_unit,  # ← RAW UNIT, нормализация в SyncService
             "min_order": get_value(mapping.min_order),
 
             "producer": get_value(mapping.producer),
@@ -302,7 +338,6 @@ class ParseService:
 
         return []
 
-
 # ============================================================
 # SYNC SERVICE
 # ============================================================
@@ -311,7 +346,7 @@ class SyncService:
 
     DEFAULT_UNIT = "778"  # упаковка
 
-    # Кэш нормализации юнитов: (provider_name, raw_unit) -> normalized_unit
+    # Кэш нормализации юнитов
     _unit_cache: Dict[Tuple[str, str], str] = {}
 
     @staticmethod
@@ -320,19 +355,10 @@ class SyncService:
 
     @staticmethod
     def _apply_unit_normalization(db: Session, provider: str, raw_unit: str | None) -> str:
-        """
-        Логика нормализации:
-        1) Если unit пуст → default 778
-        2) Если есть точное совпадение в supplier_units → normalized_unit
-        3) Если нет → default 778
-
-        ⚠️ Эту функцию не трогаем по смыслу — она может использоваться снаружи.
-        """
         if not raw_unit:
             return SyncService.DEFAULT_UNIT
 
         fixed = SupplierUnitRepo.find(db, provider, raw_unit)
-
         if fixed:
             return fixed.normalized_unit
 
@@ -340,14 +366,7 @@ class SyncService:
 
     @staticmethod
     def _normalize_unit_cached(db: Session, provider: str, raw_unit: Optional[str]) -> str:
-        """
-        Кэшированная нормализация unit с сохранением твоей исходной логики:
-        - если raw_unit пустой → DEFAULT_UNIT
-        - если raw_unit есть и есть mapping → normalized_unit
-        - если raw_unit есть и mapping НЕТ → оставить raw_unit как есть
-        """
         key = (provider, str(raw_unit) if raw_unit is not None else "")
-
         cached = SyncService._unit_cache.get(key)
         if cached is not None:
             return cached
@@ -359,7 +378,6 @@ class SyncService:
             if fixed:
                 value = fixed.normalized_unit
             else:
-                # важный момент: если маппинга нет — оставляем как есть
                 value = str(raw_unit)
 
         SyncService._unit_cache[key] = value
@@ -367,7 +385,6 @@ class SyncService:
 
     @staticmethod
     def _select_price_url(supplier: Supplier, mapping: SupplierMapping) -> Optional[str]:
-
         fmt = (mapping.format or "").lower().strip()
 
         if fmt == "json":
@@ -377,15 +394,9 @@ class SyncService:
 
         return None
 
-    # ------------------------------------------------------------
-    # ASYNC ВЕРСИЯ ДЛЯ FETCH (HTTP — асинхронно, БД — синхронно)
-    # ------------------------------------------------------------
-    
-
-    
-    # ------------------------------------------------------------
-    # СТАРАЯ СИНХРОННАЯ ВЕРСИЯ (ЛОГИКА НЕ ТРОГАЛАСЬ)
-    # ------------------------------------------------------------
+    # ======================================================================
+    #                           SYNC SINGLE SUPPLIER
+    # ======================================================================
     @staticmethod
     def sync_single_supplier(db: Session, supplier: Supplier) -> dict:
 
@@ -410,9 +421,9 @@ class SyncService:
         results = []
         total_products = 0
 
-        # ============================================================
+        # ======================================================================
         # MULTI-CITY MODE
-        # ============================================================
+        # ======================================================================
         if mapping.city_in_params:
 
             cities = (
@@ -439,12 +450,10 @@ class SyncService:
 
                 try:
                     raw = FetchService.fetch(
-                        url,
-                        supplier.login,
-                        supplier.password
+                        url, supplier.login, supplier.password
                     )
 
-                    # 🔥 FIX 1 — мусор после </root>
+                    # FIX мусора после </root>
                     if mapping.format == "xml":
                         low = raw.lower()
                         end = low.rfind("</root>")
@@ -460,7 +469,9 @@ class SyncService:
 
                         normalized = ParseService.normalize(it, mapping)
 
-                        # 🔥 FIX 2 — санитизация баркодов
+                        # =============================================================
+                        # BARCODE CLEANING
+                        # =============================================================
                         raw_barcodes = normalized.get("sku_barcodes") or []
                         clean_barcodes = []
 
@@ -474,11 +485,26 @@ class SyncService:
 
                         normalized["sku_barcodes"] = clean_barcodes
 
-                        # --- UNIT NORMALIZATION (с кэшем) ---
+                        # =============================================================
+                        # UNIT NORMALIZATION + CACHE
+                        # =============================================================
                         raw_unit = normalized.get("unit")
                         normalized["unit"] = SyncService._normalize_unit_cached(
                             db, supplier.provider_name, raw_unit
                         )
+
+                        # =============================================================
+                        # 🔥 NEW: SROK NORMALIZATION (НОВАЯ ЛОГИКА)
+                        # =============================================================
+                        raw_srok = normalized.get("sku_srok")
+
+                        normalized["sku_srok"] = SupplierSrokService.resolve_srok(
+                            db=db,
+                            provider_name=supplier.provider_name,
+                            provider_srok_raw=raw_srok,
+                        )
+
+                        # =============================================================
 
                         objects.append(
                             HourlyProduct(
@@ -512,18 +538,17 @@ class SyncService:
                         "url": url
                     })
 
-        # ============================================================
-        # SINGLE CITY MODE
-        # ============================================================
+        # ======================================================================
+        # SINGLE-CITY MODE
+        # ======================================================================
         else:
 
             try:
                 raw = FetchService.fetch(
-                    base_url,
-                    supplier.login,
-                    supplier.password
+                    base_url, supplier.login, supplier.password
                 )
 
+                # XML TRIM FIX
                 if mapping.format == "xml":
                     low = raw.lower()
                     end = low.rfind("</root>")
@@ -541,7 +566,6 @@ class SyncService:
                 )
 
                 items = ParseService.get_items_by_path(parsed, mapping.items_path)
-
                 objects: List[HourlyProduct] = []
 
                 for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
@@ -564,6 +588,19 @@ class SyncService:
                     normalized["unit"] = SyncService._normalize_unit_cached(
                         db, supplier.provider_name, raw_unit
                     )
+
+                    # =============================================================
+                    # 🔥 NEW: SROK NORMALIZATION (НОВАЯ ЛОГИКА)
+                    # =============================================================
+                    raw_srok = normalized.get("sku_srok")
+
+                    normalized["sku_srok"] = SupplierSrokService.resolve_srok(
+                        db=db,
+                        provider_name=supplier.provider_name,
+                        provider_srok_raw=raw_srok,
+                    )
+
+                    # =============================================================
 
                     objects.append(
                         HourlyProduct(
@@ -602,7 +639,9 @@ class SyncService:
             "details": results,
         }
 
-    # ------------------------------------------------------------
+    # ======================================================================
+    # DAILY SNAPSHOT
+    # ======================================================================
     @staticmethod
     def run_daily_snapshot(db: Session) -> int:
 
@@ -647,21 +686,20 @@ class SyncService:
 
         return len(daily)
 
+    # ======================================================================
+    # HOURLY SYNC ENTRYPOINT
+    # ======================================================================
     @staticmethod
     def run_hourly_sync(db: Session):
-        """
-        Главный метод почасовой синхронизации (синхронная версия).
-        Вызывается CRON-ом или scheduler'ом.
-        """
+
         suppliers = SupplierRepo.get_active(db)
 
         if not suppliers:
             return {"status": "error", "message": "No active suppliers"}
 
-        # Сбрасываем кэш юнитов перед запуском
         SyncService._reset_unit_cache()
 
-        results: List[dict] = []
+        results = []
         total = 0
 
         for supplier in suppliers:
@@ -676,8 +714,6 @@ class SyncService:
                     "message": str(e)
                 })
 
-        # 1) пересобираем канонические товары + алиасы
-      
         return {
             "status": "success",
             "total_suppliers": len(suppliers),
@@ -685,11 +721,13 @@ class SyncService:
             "details": results
         }
 
+    # ======================================================================
+    # CLEANUP HOURLY
+    # ======================================================================
     @staticmethod
     def cleanup_hourly_table(db: Session) -> bool:
         HourlyRepo.clear_table(db)
         return True
-
 
 
 # ============================================================
@@ -1102,3 +1140,5 @@ class PostProcessService:
             "finished_at": finished.isoformat(),
             "duration_seconds": (finished - started).total_seconds(),
         }
+
+

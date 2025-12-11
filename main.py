@@ -79,6 +79,7 @@ from views import (
     HourlyProductAdmin,
     DailyProductAdmin,
     ProductCompareAdmin,
+    SupllierSrokAdmin
 )
 
 
@@ -90,6 +91,7 @@ admin = Admin(app, engine)
 admin.add_view(SupplierAdmin)
 admin.add_view(SupplierMappingAdmin)
 admin.add_view(CityResponseAdmin)
+admin.add_view(SupllierSrokAdmin)
 admin.add_view(SupplierUnitAdmin)
 admin.add_view(HourlyProductAdmin)
 admin.add_view(DailyProductAdmin)

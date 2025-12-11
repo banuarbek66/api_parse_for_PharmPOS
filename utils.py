@@ -6,6 +6,113 @@
 from typing import Any, List, Optional, Dict, Union
 
 
+def normalize_srok(raw: str | None, pattern: str | None = None) -> str:
+    """
+    Нормализует срок годности в единый формат dd-mm-yyyy.
+
+    - raw: реальное значение из API, например "20261031" или "31.10.2026"
+    - pattern: маска, которую ты записал в supplier_srok_response.provider_srok_raw,
+      например "yyyymmdd", "ddmmyyyy", "dd.mm.yyyy", "yyyy-mm-dd" и т.п.
+
+    Если pattern задана и длины совпадают — разбираем строго по маске.
+    Если маска не подходит — fallback на старую эвристику.
+    """
+
+    if not raw:
+        return ""
+
+    raw_str = str(raw).strip()
+
+    # Если есть pattern — пробуем разобрать по ней
+    if pattern:
+        pattern_str = pattern.strip()
+
+        # Убираем разделители из паттерна, оставляем только d/m/y
+        pat_clean = re.sub(r"[^dmyDMY]", "", pattern_str.lower())
+        # Убираем всё кроме цифр из значения
+        digits = re.sub(r"\D", "", raw_str)
+
+        if pat_clean and len(pat_clean) == len(digits):
+            # Разбиваем паттерн на группы (dddmmmYYYY и т.п.)
+            groups = []
+            start = 0
+            for i in range(1, len(pat_clean) + 1):
+                if i == len(pat_clean) or pat_clean[i] != pat_clean[start]:
+                    groups.append((pat_clean[start], start, i))
+                    start = i
+
+            # Пробегаем по группам и вырезаем куски из digits
+            pos = 0
+            dd = None
+            mm = None
+            yyyy = None
+
+            for ch, s, e in groups:
+                length = e - s
+                part = digits[pos : pos + length]
+                pos += length
+
+                if ch == "d":
+                    dd = part
+                elif ch == "m":
+                    mm = part
+                elif ch == "y":
+                    yyyy = part
+
+            # Приводим год
+            if yyyy:
+                if len(yyyy) == 2:
+                    yyyy = "20" + yyyy
+                elif len(yyyy) == 3:
+                    yyyy = "2" + yyyy  # на всякий случай
+
+            # Если всё получилось — возвращаем dd-mm-yyyy
+            if dd and mm and yyyy:
+                dd = dd.zfill(2)
+                mm = mm.zfill(2)
+                return f"{dd}-{mm}-{yyyy}"
+
+    # -------- Fallback: старая эвристика --------
+    cleaned = raw_str.replace("/", "-").replace(".", "-").replace(" ", "-")
+    parts = [p for p in cleaned.split("-") if p]
+
+    # 1) YYYY-MM-DD
+    if len(parts) == 3 and len(parts[0]) == 4:
+        yyyy = parts[0]
+        mm = parts[1].zfill(2)
+        dd = parts[2].zfill(2)
+        return f"{dd}-{mm}-{yyyy}"
+
+    # 2) DD-MM-YYYY
+    if len(parts) == 3 and len(parts[2]) == 4:
+        dd = parts[0].zfill(2)
+        mm = parts[1].zfill(2)
+        yyyy = parts[2]
+        return f"{dd}-{mm}-{yyyy}"
+
+    # 3) MM-YYYY → ставим 01 день
+    if len(parts) == 2 and len(parts[1]) == 4:
+        mm = parts[0].zfill(2)
+        yyyy = parts[1]
+        return f"01-{mm}-{yyyy}"
+
+    # 4) MM-YY → ставим 20YY
+    if len(parts) == 2 and len(parts[1]) == 2:
+        mm = parts[0].zfill(2)
+        yyyy = "20" + parts[1]
+        return f"01-{mm}-{yyyy}"
+
+    # 5) "122025" и т.п.
+    digits = re.fullmatch(r"\d{6}", raw_str)
+    if digits:
+        mm = raw_str[:2]
+        yyyy = raw_str[2:]
+        if len(yyyy) == 2:
+            yyyy = "20" + yyyy
+        return f"01-{mm}-{yyyy}"
+
+    # 6) fallback — возвращаем как есть
+    return raw_str
 # ============================================================
 # SAFE GET
 # ============================================================
@@ -259,4 +366,9 @@ def normalize_name(name: str | None) -> str:
     # убираем двойные пробелы
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+# utils.py
+
+from datetime import datetime, date
+
 
