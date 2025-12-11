@@ -451,8 +451,10 @@ class ProductCanonicalRepo:
         db.execute(
             insert(ProductCanonical)
             .values(sanitized)
-            .on_conflict_do_nothing(index_elements=["canonical_barcode"])
+            .on_conflict_do_nothing(
+        constraint="product_canonical_canonical_barcode_key"
         )
+    )
 
 # ============================================================
 # BARCODE ALIAS REPO
@@ -483,8 +485,11 @@ class BarcodeAliasRepo:
         db.execute(
             insert(BarcodeAlias)
             .values(rows)
-            .on_conflict_do_nothing(index_elements=["barcode"])
-        )
+            .on_conflict_do_nothing(
+        constraint="barcode_aliases_barcode_key"
+    )
+)
+
    
 
 class SupplierSrokRepo:

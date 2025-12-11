@@ -301,18 +301,13 @@ class SupplierSrokResponse(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
+    # Имя поставщика (medservice, amanat, rauza и т.п.)
     provider_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
-    provider_srok_raw: Mapped[str] = mapped_column(String(50), nullable=False)
-    # например:
-    # "12.2025"
-    # "31.12.25"
-    # "DEC 2025"
-    # "2026-01-15"
+    # ОПИСАНИЕ ФОРМАТА срока от поставщика, например:
+    # "yyyymmdd", "ddmmyyyy", "dd.mm.yyyy", "yyyy-mm-dd" и т.п.
+    provider_srok_raw: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    normalized_srok: Mapped[str] = mapped_column(String(50), nullable=True)
-    # например:
-    # "2025-12"
-    # "2025-12-31"
-
-    
+    # Можно не использовать или всегда считать, что "dd-mm-yyyy"
+    # (оставляем поле на будущее, но логика работает через provider_srok_raw)
+    normalized_srok: Mapped[str] = mapped_column(String(20), nullable=True)
