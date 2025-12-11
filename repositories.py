@@ -6,7 +6,7 @@
 from typing import List, Optional
 from datetime import datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from models import (
@@ -316,6 +316,16 @@ class HourlyRepo:
             q = q.filter(HourlyProduct.city == city)
 
         return q.all()
+    @staticmethod
+    def get_latest(db: Session):
+        return db.execute(text("""
+            SELECT DISTINCT ON (b.code)
+                   h.*
+            FROM hourly_products h
+            JOIN LATERAL jsonb_array_elements_text(h.sku_barcodes) AS b(code) ON TRUE
+            WHERE jsonb_array_length(h.sku_barcodes) > 0
+            ORDER BY b.code, h.created_at DESC;
+        """)).all()
 
 
 # ============================================================
@@ -408,11 +418,6 @@ class ProductCanonicalRepo:
 
     @staticmethod
     def preload_all(db: Session) -> Dict[Tuple[str, Optional[str]], int]:
-        """
-        ⚡ Загружаем ВСЕ канонические товары в память
-        key = (name_key, producer)
-        value = canonical_id
-        """
         rows = db.execute(
             select(
                 ProductCanonical.id,
@@ -423,28 +428,21 @@ class ProductCanonicalRepo:
 
         return {
             (r.name_key, r.producer): r.id
-            for r in rows
-            if r.name_key
+            for r in rows if r.name_key
         }
 
     @staticmethod
-    def bulk_create(
-        db: Session,
-        items: Iterable[dict],
-    ) -> None:
-        """
-        items = [{
-            canonical_barcode,
-            name_key,
-            producer,
-            producer_country
-        }]
-        """
+    def bulk_create(db: Session, items: Iterable[dict]) -> None:
+        items = list(items)
         if not items:
             return
 
-        db.bulk_insert_mappings(ProductCanonical, list(items))
-
+        # INSERT ... ON CONFLICT DO NOTHING
+        db.execute(
+            insert(ProductCanonical)
+            .values(items)
+            .on_conflict_do_nothing(index_elements=["canonical_barcode"])
+        )
 # ============================================================
 # BARCODE ALIAS REPO
 # ============================================================
