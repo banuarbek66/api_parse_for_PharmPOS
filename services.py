@@ -985,16 +985,19 @@ class AnalyticsService:
 # ============================================================
 # CANONICAL RESOLVE SERVICE
 # ============================================================
-
+from uuid import UUID 
+from sqlalchemy import select
 class CanonicalResolveService:
     """
     Строит и обновляет product_canonical и barcode_aliases
     на основе ПОСЛЕДНИХ записей hourly_products.
 
     Логика:
-    1) грузим canonical:      (name_key, producer) → canonical_id
-    2) грузим aliases:        barcode → canonical_id
-    3) берём только ПОСЛЕДНИЕ hourly-записи
+    1) грузим canonical:
+        - (name_key, producer) → canonical_id
+        - canonical_barcode → canonical_id
+    2) грузим aliases: barcode → canonical_id
+    3) берём только ПОСЛЕДНИЕ hourly-записи (HourlyRepo.get_latest)
     4) определяем canonical_id (существующий или новый)
     5) создаём aliases
     6) сохраняем всё одним коммитом
@@ -1010,22 +1013,41 @@ class CanonicalResolveService:
         # =========================
         # 2. preload canonical + alias maps
         # =========================
+        # 2.1. (name_key, producer) -> canonical_id
         canonical_by_name = ProductCanonicalRepo.preload_all(db)
+
+        # 2.2. barcode -> canonical_id из barcode_aliases
         alias_map = BarcodeAliasRepo.preload_all(db)
 
-        seen_keys = set()
-        new_canonicals = []
-        new_aliases_raw = []
+        # 2.3. barcode -> canonical_id из product_canonical
+        canonical_by_barcode: Dict[str, UUID] = {}
+        rows = db.execute(
+            select(
+                ProductCanonical.canonical_barcode,
+                ProductCanonical.id,
+            )
+        ).all()
+        for r in rows:
+            if r.canonical_barcode:
+                canonical_by_barcode[str(r.canonical_barcode)] = r.id
+
+        seen_keys: Set[Tuple[Optional[str], Optional[str], Tuple[str, ...]]] = set()
+        new_canonicals: List[dict] = []
+        new_aliases_raw: List[dict] = []
 
         # =========================
         # 3. Проходим все hourly товары
         # =========================
         for item in items:
-            barcodes = [
-                str(b).strip()
-                for b in (item.sku_barcodes or [])
-                if str(b).strip()
-            ]
+            # ---------- barcodes: чистим и фильтруем ----------
+            raw_barcodes = item.sku_barcodes or []
+            barcodes: List[str] = []
+
+            for b in raw_barcodes:
+                s = str(b).strip()
+                # жёсткая фильтрация баркодов
+                if s.isdigit() and 6 <= len(s) <= 14:
+                    barcodes.append(s)
 
             name_key = normalize_name(item.sku_name) if item.sku_name else None
             producer = item.producer
@@ -1042,72 +1064,126 @@ class CanonicalResolveService:
             # ---------- поиск canonical ----------
             canonical_id = None
 
-            # 1) по barcode → alias_map
+            # 1) по barcode через alias_map
             for b in barcodes:
                 cid = alias_map.get(b)
                 if cid:
                     canonical_id = cid
                     break
 
-            # 2) по (name_key, producer)
+            # 2) по barcode напрямую из product_canonical
+            if not canonical_id:
+                for b in barcodes:
+                    cid = canonical_by_barcode.get(b)
+                    if cid:
+                        canonical_id = cid
+                        break
+
+            # 3) по (name_key, producer)
             if not canonical_id and name_key:
                 canonical_id = canonical_by_name.get((name_key, producer))
 
             # ---------- если canonical нет → создаём новый ----------
             if not canonical_id:
-                new_canonicals.append({
-                    "canonical_barcode": barcodes[0] if barcodes else None,
-                    "name_key": name_key,
-                    "producer": producer,
-                    "producer_country": item.producer_country,
-                })
+                main_barcode = barcodes[0] if barcodes else None
 
-                # временный ID, заменим позже
-                canonical_id = ("NEW", len(new_canonicals))
+                # защита от дублей по barcode:
+                # если такой barcode уже есть в canonical_by_barcode —
+                # просто используем существующий id, не создаём новый canonical
+                if main_barcode and main_barcode in canonical_by_barcode:
+                    canonical_id = canonical_by_barcode[main_barcode]
+                else:
+                    new_canonicals.append(
+                        {
+                            "canonical_barcode": main_barcode,
+                            "name_key": name_key,
+                            "producer": producer,
+                            "producer_country": item.producer_country,
+                        }
+                    )
+                    # временный ID, заменим позже
+                    canonical_id = ("NEW", len(new_canonicals))
 
-                # добавляем его в карту для дальнейшего использования
-                canonical_by_name[(name_key, producer)] = canonical_id
+                    # добавляем в локальные карты, чтобы следующие товары
+                    # могли находить этот canonical
+                    canonical_by_name[(name_key, producer)] = canonical_id
+                    if main_barcode:
+                        canonical_by_barcode[main_barcode] = canonical_id
 
             # ---------- собираем алиасы ----------
             for b in barcodes:
                 if b not in alias_map:
-                    new_aliases_raw.append({
-                        "barcode": b,
-                        "provider_name": item.provider_name,
-                        "canonical_temp": canonical_id,
-                    })
-                    alias_map[b] = canonical_id  # используем дальше
+                    new_aliases_raw.append(
+                        {
+                            "barcode": b,
+                            "provider_name": item.provider_name,
+                            "canonical_temp": canonical_id,
+                        }
+                    )
+                    alias_map[b] = canonical_id  # используем дальше в этом же прогоне
 
         # =========================
-        # 4. Сохраняем canonical
+        # 4. Сохраняем новые canonical
         # =========================
         if new_canonicals:
             ProductCanonicalRepo.bulk_create(db, new_canonicals)
 
-        # снова загружаем canonical с реальными UUID
+        # после вставки — снова загружаем реальные UUID
+        # 4.1. (name_key, producer) -> id
         canonical_by_name = ProductCanonicalRepo.preload_all(db)
 
+        # 4.2. barcode -> id
+        canonical_by_barcode = {}
+        rows = db.execute(
+            select(
+                ProductCanonical.canonical_barcode,
+                ProductCanonical.id,
+            )
+        ).all()
+        for r in rows:
+            if r.canonical_barcode:
+                canonical_by_barcode[str(r.canonical_barcode)] = r.id
+
         # =========================
-        # 5. Разрешаем временные canonical_temp → UUID
+        # 5. Разрешаем временные canonical_temp → реальные UUID
         # =========================
-        resolved_aliases = []
+        resolved_aliases: List[dict] = []
 
         for a in new_aliases_raw:
             temp = a["canonical_temp"]
 
-            # если это NEW Canonical
+            # если это NEW Canonical (("NEW", index))
             if isinstance(temp, tuple) and temp[0] == "NEW":
-                index = temp[1] - 1  # позиция в списке
+                index = temp[1] - 1
                 c = new_canonicals[index]
-                real_id = canonical_by_name.get((c["name_key"], c["producer"]))
-            else:
-                real_id = temp  # UUID уже известен
 
-            resolved_aliases.append({
-                "barcode": a["barcode"],
-                "provider_name": a["provider_name"],
-                "canonical_id": real_id,
-            })
+                real_id = None
+
+                # приоритет: по barcode
+                main_barcode = c.get("canonical_barcode")
+                if main_barcode:
+                    real_id = canonical_by_barcode.get(main_barcode)
+
+                # fallback: по (name_key, producer)
+                if not real_id:
+                    real_id = canonical_by_name.get(
+                        (c.get("name_key"), c.get("producer"))
+                    )
+            else:
+                # уже реальный UUID
+                real_id = temp
+
+            # на всякий случай — если real_id не нашли, пропускаем такой alias
+            if not real_id:
+                continue
+
+            resolved_aliases.append(
+                {
+                    "barcode": a["barcode"],
+                    "provider_name": a["provider_name"],
+                    "canonical_id": real_id,
+                }
+            )
 
         # =========================
         # 6. Сохраняем aliases
