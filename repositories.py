@@ -407,7 +407,7 @@ class DailyRepo:
 
         return q.all()
 
-
+from uuid import UUID
 # ============================================================
 # PRODUCT CANONICAL REPO
 # ============================================================
@@ -417,7 +417,7 @@ from sqlalchemy.dialects.postgresql import insert
 class ProductCanonicalRepo:
 
     @staticmethod
-    def preload_all(db: Session) -> Dict[Tuple[str, Optional[str]], int]:
+    def preload_all(db: Session) -> Dict[Tuple[str, Optional[str]], UUID]:
         rows = db.execute(
             select(
                 ProductCanonical.id,
@@ -437,12 +437,23 @@ class ProductCanonicalRepo:
         if not items:
             return
 
-        # INSERT ... ON CONFLICT DO NOTHING
+        # Удаляем ID, если где-то внезапно появился
+        sanitized = []
+        for it in items:
+            clean = {
+                "canonical_barcode": it.get("canonical_barcode"),
+                "name_key": it.get("name_key"),
+                "producer": it.get("producer"),
+                "producer_country": it.get("producer_country"),
+            }
+            sanitized.append(clean)
+
         db.execute(
             insert(ProductCanonical)
-            .values(items)
+            .values(sanitized)
             .on_conflict_do_nothing(index_elements=["canonical_barcode"])
         )
+
 # ============================================================
 # BARCODE ALIAS REPO
 # ============================================================

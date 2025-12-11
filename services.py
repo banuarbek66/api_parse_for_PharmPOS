@@ -1040,13 +1040,13 @@ class CanonicalResolveService:
             seen_keys.add(combo_key)
 
             # ---------- поиск canonical ----------
-
             canonical_id = None
 
             # 1) по barcode → alias_map
             for b in barcodes:
-                if b in alias_map:
-                    canonical_id = alias_map[b]
+                cid = alias_map.get(b)
+                if cid:
+                    canonical_id = cid
                     break
 
             # 2) по (name_key, producer)
@@ -1065,7 +1065,7 @@ class CanonicalResolveService:
                 # временный ID, заменим позже
                 canonical_id = ("NEW", len(new_canonicals))
 
-                # добавляем в карту, чтобы следующие товары могли найти canonical
+                # добавляем его в карту для дальнейшего использования
                 canonical_by_name[(name_key, producer)] = canonical_id
 
             # ---------- собираем алиасы ----------
@@ -1076,7 +1076,7 @@ class CanonicalResolveService:
                         "provider_name": item.provider_name,
                         "canonical_temp": canonical_id,
                     })
-                    alias_map[b] = canonical_id  # чтобы следующие товары использовали его
+                    alias_map[b] = canonical_id  # используем дальше
 
         # =========================
         # 4. Сохраняем canonical
@@ -1084,24 +1084,24 @@ class CanonicalResolveService:
         if new_canonicals:
             ProductCanonicalRepo.bulk_create(db, new_canonicals)
 
-        # повторно грузим canonical с реальными UUID
+        # снова загружаем canonical с реальными UUID
         canonical_by_name = ProductCanonicalRepo.preload_all(db)
 
         # =========================
-        # 5. Заменяем временные canonical_id (("NEW", index) → UUID)
+        # 5. Разрешаем временные canonical_temp → UUID
         # =========================
         resolved_aliases = []
 
         for a in new_aliases_raw:
             temp = a["canonical_temp"]
 
-            # NEW canonical
+            # если это NEW Canonical
             if isinstance(temp, tuple) and temp[0] == "NEW":
-                index = temp[1] - 1
+                index = temp[1] - 1  # позиция в списке
                 c = new_canonicals[index]
                 real_id = canonical_by_name.get((c["name_key"], c["producer"]))
             else:
-                real_id = temp  # уже UUID из базы или alias_map
+                real_id = temp  # UUID уже известен
 
             resolved_aliases.append({
                 "barcode": a["barcode"],
