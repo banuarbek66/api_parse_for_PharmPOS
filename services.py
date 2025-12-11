@@ -154,22 +154,47 @@ class CityService:
         return str(value).strip() if value else None
 
     @staticmethod
-    def resolve_city(db: Session, provider_name: str, city_code=None, city_name=None) -> str:
-
-        city = CityResponseRepo.find_city(
-            db=db,
-            provider_name=provider_name,
-            code=city_code,
-            name=city_name
+    def resolve_city(db: Session, provider_name: str, city_code: str, city_name: str) -> str:
+        city = (
+            db.query(CityResponse)
+            .filter(
+                CityResponse.provider_name == provider_name,
+                CityResponse.supplier_city_code == city_code
+            )
+            .first()
         )
 
-        if not city:
-            raise ValueError(
-                f"City '{city_code or city_name}' for provider '{provider_name}' is not registered"
+        if city:
+            return city.normalized_city
+
+        try:
+            obj = CityResponse(
+                provider_name=provider_name,
+                supplier_city_code=city_code,
+                supplier_city_name=city_name,
+                normalized_city=city_name.lower()
             )
+            db.add(obj)
+            db.commit()
+            db.refresh(obj)
+            return obj.normalized_city
 
-        return city.normalized_city
+        except Exception:
+            db.rollback()
 
+            # Дубликат? Значит создал кто-то другой
+            city = (
+                db.query(CityResponse)
+                .filter(
+                    CityResponse.provider_name == provider_name,
+                    CityResponse.supplier_city_code == city_code
+                )
+                .first()
+            )
+            if city:
+                return city.normalized_city
+
+            raise
 
 # ============================================================
 # FETCH SERVICE (СИНХРОННЫЙ)
@@ -400,60 +425,147 @@ class SyncService:
     @staticmethod
     def sync_single_supplier(db: Session, supplier: Supplier) -> dict:
 
-        mapping = MappingRepo.get_by_provider(db, supplier.provider_name)
+        try:
+            mapping = MappingRepo.get_by_provider(db, supplier.provider_name)
 
-        if not mapping:
-            return {
-                "provider": supplier.provider_name,
-                "status": "failed",
-                "message": "Mapping not found"
-            }
-
-        base_url = SyncService._select_price_url(supplier, mapping)
-
-        if not base_url:
-            return {
-                "provider": supplier.provider_name,
-                "status": "failed",
-                "message": "URL not found"
-            }
-
-        results = []
-        total_products = 0
-
-        # ======================================================================
-        # MULTI-CITY MODE
-        # ======================================================================
-        if mapping.city_in_params:
-
-            cities = (
-                db.query(CityResponse)
-                .filter(CityResponse.provider_name == supplier.provider_name)
-                .all()
-            )
-
-            if not cities:
+            if not mapping:
                 return {
                     "provider": supplier.provider_name,
-                    "status": "error",
-                    "message": "No cities registered"
+                    "status": "failed",
+                    "message": "Mapping not found"
                 }
 
-            for city in cities:
+            base_url = SyncService._select_price_url(supplier, mapping)
 
-                if "{city}" in base_url:
-                    url = base_url.format(city=city.supplier_city_code)
-                else:
-                    param = supplier.city_param_name or "city_id"
-                    sep = "&" if "?" in base_url else "?"
-                    url = f"{base_url}{sep}{param}={city.supplier_city_code}"
+            if not base_url:
+                return {
+                    "provider": supplier.provider_name,
+                    "status": "failed",
+                    "message": "URL not found"
+                }
 
+            results = []
+            total_products = 0
+
+            # ======================================================================
+            # MULTI-CITY MODE
+            # ======================================================================
+            if mapping.city_in_params:
+
+                cities = (
+                    db.query(CityResponse)
+                    .filter(CityResponse.provider_name == supplier.provider_name)
+                    .all()
+                )
+
+                if not cities:
+                    return {
+                        "provider": supplier.provider_name,
+                        "status": "error",
+                        "message": "No cities registered"
+                    }
+
+                for city in cities:
+
+                    if "{city}" in base_url:
+                        url = base_url.format(city=city.supplier_city_code)
+                    else:
+                        param = supplier.city_param_name or "city_id"
+                        sep = "&" if "?" in base_url else "?"
+                        url = f"{base_url}{sep}{param}={city.supplier_city_code}"
+
+                    try:
+                        raw = FetchService.fetch(
+                            url, supplier.login, supplier.password
+                        )
+
+                        # XML FIX
+                        if mapping.format == "xml":
+                            low = raw.lower()
+                            end = low.rfind("</root>")
+                            if end != -1:
+                                raw = raw[: end + len("</root>")]
+
+                        parsed = ParseService.parse(raw, mapping.format)
+                        items = ParseService.get_items_by_path(parsed, mapping.items_path)
+
+                        objects: List[HourlyProduct] = []
+
+                        for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
+
+                            normalized = ParseService.normalize(it, mapping)
+
+                            # ------------------ BARCODE CLEAN ------------------
+                            raw_barcodes = normalized.get("sku_barcodes") or []
+                            clean_barcodes = [
+                                str(b).strip()
+                                for b in raw_barcodes
+                                if str(b).strip().isdigit() and 6 <= len(str(b).strip()) <= 14
+                            ]
+
+                            if not clean_barcodes:
+                                continue
+
+                            normalized["sku_barcodes"] = clean_barcodes
+
+                            # ------------------ UNIT ---------------------------
+                            raw_unit = normalized.get("unit")
+                            normalized["unit"] = SyncService._normalize_unit_cached(
+                                db, supplier.provider_name, raw_unit
+                            )
+
+                            # ------------------ SROK (NEW) ----------------------
+                            raw_srok = normalized.get("sku_srok")
+
+                            normalized["sku_srok"] = SupplierSrokService.resolve_srok(
+                                db=db,
+                                provider_name=supplier.provider_name,
+                                provider_srok_raw=raw_srok,
+                            )
+
+                            # ------------------ SAVE PRODUCT --------------------
+                            objects.append(
+                                HourlyProduct(
+                                    provider_id=supplier.id,
+                                    provider_name=supplier.provider_name,
+                                    provider_bin=supplier.provider_bin,
+                                    city=city.normalized_city,
+                                    **normalized
+                                )
+                            )
+
+                        if objects:
+                            HourlyRepo.bulk_create(db, objects)
+
+                        total_products += len(objects)
+
+                        results.append({
+                            "city": city.normalized_city,
+                            "supplier_city_code": city.supplier_city_code,
+                            "processed": len(objects),
+                            "status": "success",
+                            "url": url
+                        })
+
+                    except Exception as e:
+                        db.rollback()
+                        results.append({
+                            "city": city.normalized_city,
+                            "supplier_city_code": city.supplier_city_code,
+                            "status": "error",
+                            "message": str(e),
+                            "url": url
+                        })
+
+            # ======================================================================
+            # SINGLE-CITY MODE
+            # ======================================================================
+            else:
                 try:
                     raw = FetchService.fetch(
-                        url, supplier.login, supplier.password
+                        base_url, supplier.login, supplier.password
                     )
 
-                    # FIX мусора после </root>
                     if mapping.format == "xml":
                         low = raw.lower()
                         end = low.rfind("</root>")
@@ -461,41 +573,42 @@ class SyncService:
                             raw = raw[: end + len("</root>")]
 
                     parsed = ParseService.parse(raw, mapping.format)
-                    items = ParseService.get_items_by_path(parsed, mapping.items_path)
 
+                    city_raw = CityService.extract_city_from_response(mapping, parsed)
+                    city = CityService.resolve_city(
+                        db=db,
+                        provider_name=supplier.provider_name,
+                        city_code=city_raw,
+                        city_name=city_raw,
+                    )
+
+                    items = ParseService.get_items_by_path(parsed, mapping.items_path)
                     objects: List[HourlyProduct] = []
 
                     for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
 
                         normalized = ParseService.normalize(it, mapping)
 
-                        # =============================================================
-                        # BARCODE CLEANING
-                        # =============================================================
+                        # barcode
                         raw_barcodes = normalized.get("sku_barcodes") or []
-                        clean_barcodes = []
-
-                        for b in raw_barcodes:
-                            b = str(b).strip()
-                            if b.isdigit() and 6 <= len(b) <= 14:
-                                clean_barcodes.append(b)
+                        clean_barcodes = [
+                            str(b).strip()
+                            for b in raw_barcodes
+                            if str(b).strip().isdigit()
+                        ]
 
                         if not clean_barcodes:
                             continue
 
                         normalized["sku_barcodes"] = clean_barcodes
 
-                        # =============================================================
-                        # UNIT NORMALIZATION + CACHE
-                        # =============================================================
+                        # unit
                         raw_unit = normalized.get("unit")
                         normalized["unit"] = SyncService._normalize_unit_cached(
                             db, supplier.provider_name, raw_unit
                         )
 
-                        # =============================================================
-                        # 🔥 NEW: SROK NORMALIZATION (НОВАЯ ЛОГИКА)
-                        # =============================================================
+                        # srok
                         raw_srok = normalized.get("sku_srok")
 
                         normalized["sku_srok"] = SupplierSrokService.resolve_srok(
@@ -504,14 +617,12 @@ class SyncService:
                             provider_srok_raw=raw_srok,
                         )
 
-                        # =============================================================
-
                         objects.append(
                             HourlyProduct(
                                 provider_id=supplier.id,
                                 provider_name=supplier.provider_name,
                                 provider_bin=supplier.provider_bin,
-                                city=city.normalized_city,
+                                city=city,
                                 **normalized
                             )
                         )
@@ -522,122 +633,35 @@ class SyncService:
                     total_products += len(objects)
 
                     results.append({
-                        "city": city.normalized_city,
-                        "supplier_city_code": city.supplier_city_code,
+                        "city": city,
                         "processed": len(objects),
                         "status": "success",
-                        "url": url
+                        "url": base_url
                     })
 
                 except Exception as e:
-                    results.append({
-                        "city": city.normalized_city,
-                        "supplier_city_code": city.supplier_city_code,
+                    db.rollback()
+                    return {
+                        "provider": supplier.provider_name,
                         "status": "error",
-                        "message": str(e),
-                        "url": url
-                    })
+                        "message": str(e)
+                    }
 
-        # ======================================================================
-        # SINGLE-CITY MODE
-        # ======================================================================
-        else:
+            return {
+                "provider": supplier.provider_name,
+                "status": "success",
+                "total_products": total_products,
+                "cities_processed": len(results),
+                "details": results,
+            }
 
-            try:
-                raw = FetchService.fetch(
-                    base_url, supplier.login, supplier.password
-                )
-
-                # XML TRIM FIX
-                if mapping.format == "xml":
-                    low = raw.lower()
-                    end = low.rfind("</root>")
-                    if end != -1:
-                        raw = raw[: end + len("</root>")]
-
-                parsed = ParseService.parse(raw, mapping.format)
-
-                city_raw = CityService.extract_city_from_response(mapping, parsed)
-                city = CityService.resolve_city(
-                    db=db,
-                    provider_name=supplier.provider_name,
-                    city_code=city_raw,
-                    city_name=city_raw,
-                )
-
-                items = ParseService.get_items_by_path(parsed, mapping.items_path)
-                objects: List[HourlyProduct] = []
-
-                for it in items[:MAX_PRODUCTS_PER_PROVIDER]:
-
-                    normalized = ParseService.normalize(it, mapping)
-
-                    raw_barcodes = normalized.get("sku_barcodes") or []
-                    clean_barcodes = [
-                        str(b).strip()
-                        for b in raw_barcodes
-                        if str(b).strip().isdigit()
-                    ]
-
-                    if not clean_barcodes:
-                        continue
-
-                    normalized["sku_barcodes"] = clean_barcodes
-
-                    raw_unit = normalized.get("unit")
-                    normalized["unit"] = SyncService._normalize_unit_cached(
-                        db, supplier.provider_name, raw_unit
-                    )
-
-                    # =============================================================
-                    # 🔥 NEW: SROK NORMALIZATION (НОВАЯ ЛОГИКА)
-                    # =============================================================
-                    raw_srok = normalized.get("sku_srok")
-
-                    normalized["sku_srok"] = SupplierSrokService.resolve_srok(
-                        db=db,
-                        provider_name=supplier.provider_name,
-                        provider_srok_raw=raw_srok,
-                    )
-
-                    # =============================================================
-
-                    objects.append(
-                        HourlyProduct(
-                            provider_id=supplier.id,
-                            provider_name=supplier.provider_name,
-                            provider_bin=supplier.provider_bin,
-                            city=city,
-                            **normalized
-                        )
-                    )
-
-                if objects:
-                    HourlyRepo.bulk_create(db, objects)
-
-                total_products += len(objects)
-
-                results.append({
-                    "city": city,
-                    "processed": len(objects),
-                    "status": "success",
-                    "url": base_url
-                })
-
-            except Exception as e:
-                return {
-                    "provider": supplier.provider_name,
-                    "status": "error",
-                    "message": str(e)
-                }
-
-        return {
-            "provider": supplier.provider_name,
-            "status": "success",
-            "total_products": total_products,
-            "cities_processed": len(results),
-            "details": results,
-        }
+        except Exception as outer:
+            db.rollback()
+            return {
+                "provider": supplier.provider_name,
+                "status": "error",
+                "message": f"Fatal error: {outer}"
+            }
 
     # ======================================================================
     # DAILY SNAPSHOT
