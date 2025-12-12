@@ -1199,6 +1199,7 @@ class CanonicalResolveService:
 # PRODUCT COMPARE SERVICE
 # ============================================================
 
+
 class ProductCompareService:
     """
     Витрина сравнения цен (product_compare)
@@ -1213,18 +1214,11 @@ class ProductCompareService:
 
     @staticmethod
     def rebuild_from_hourly(db: Session) -> None:
-        # 1) чистим витрину
+        # 1️⃣ чистим витрину
         db.execute(text("TRUNCATE TABLE product_compare"))
         db.commit()
 
-        # 2) наполняем витрину
-        # FIX: sku_price в hourly_products = varchar, а в витрине может быть text (как в моделях)
-        # Поэтому:
-        #   - чистим строку (убираем пробелы)
-        #   - заменяем запятую на точку
-        #   - NULLIF('') -> NULL
-        #   - приведение к numeric через ::numeric (Postgres)
-        #   - и в конце ::text, чтобы гарантированно вставлялось как строка
+        # 2️⃣ наполняем витрину
         db.execute(text("""
             INSERT INTO product_compare (
                 barcode,
@@ -1240,39 +1234,44 @@ class ProductCompareService:
                 MIN(h.sku_name) AS sku_name,
 
                 MAX(
-                    NULLIF(
-                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
-                        ''
-                    )::numeric
-                ) FILTER (WHERE h.provider_name = 'atamiras')::text AS price_atamiras,
+                    CASE
+                        WHEN h.provider_name = 'atamiras'
+                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                    END
+                )::text AS price_atamiras,
 
                 MAX(
-                    NULLIF(
-                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
-                        ''
-                    )::numeric
-                ) FILTER (WHERE h.provider_name = 'medservice')::text AS price_medservice,
+                    CASE
+                        WHEN h.provider_name = 'medservice'
+                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                    END
+                )::text AS price_medservice,
 
                 MAX(
-                    NULLIF(
-                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
-                        ''
-                    )::numeric
-                ) FILTER (WHERE h.provider_name = 'stopharm')::text AS price_stopharm,
+                    CASE
+                        WHEN h.provider_name = 'stopharm'
+                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                    END
+                )::text AS price_stopharm,
 
                 MAX(
-                    NULLIF(
-                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
-                        ''
-                    )::numeric
-                ) FILTER (WHERE h.provider_name = 'amanat')::text AS price_amanat,
+                    CASE
+                        WHEN h.provider_name = 'amanat'
+                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                    END
+                )::text AS price_amanat,
 
                 MAX(
-                    NULLIF(
-                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
-                        ''
-                    )::numeric
-                ) FILTER (WHERE h.provider_name = 'rauza')::text AS price_rauza
+                    CASE
+                        WHEN h.provider_name = 'rauza'
+                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                    END
+                )::text AS price_rauza
 
             FROM hourly_products h
             JOIN LATERAL jsonb_array_elements_text(h.sku_barcodes) AS b(code) ON TRUE
