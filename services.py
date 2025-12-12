@@ -1200,14 +1200,31 @@ class CanonicalResolveService:
 # ============================================================
 
 class ProductCompareService:
+    """
+    Витрина сравнения цен (product_compare)
+
+    Логика:
+    1) TRUNCATE product_compare
+    2) INSERT агрегата по canonical_id:
+       - barcode = MIN(barcode)
+       - sku_name = MIN(sku_name)
+       - price_* = MAX(price) по каждому provider
+    """
 
     @staticmethod
     def rebuild_from_hourly(db: Session) -> None:
-        # 1️⃣ чистим витрину
+        # 1) чистим витрину
         db.execute(text("TRUNCATE TABLE product_compare"))
         db.commit()
 
-        # 2️⃣ наполняем витрину
+        # 2) наполняем витрину
+        # FIX: sku_price в hourly_products = varchar, а в витрине может быть text (как в моделях)
+        # Поэтому:
+        #   - чистим строку (убираем пробелы)
+        #   - заменяем запятую на точку
+        #   - NULLIF('') -> NULL
+        #   - приведение к numeric через ::numeric (Postgres)
+        #   - и в конце ::text, чтобы гарантированно вставлялось как строка
         db.execute(text("""
             INSERT INTO product_compare (
                 barcode,
@@ -1219,23 +1236,43 @@ class ProductCompareService:
                 price_rauza
             )
             SELECT
-                MIN(b.code)              AS barcode,
-                MIN(h.sku_name)          AS sku_name,
+                MIN(b.code) AS barcode,
+                MIN(h.sku_name) AS sku_name,
 
-                MAX(h.sku_price)
-                    FILTER (WHERE h.provider_name = 'atamiras') AS price_atamiras,
+                MAX(
+                    NULLIF(
+                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
+                        ''
+                    )::numeric
+                ) FILTER (WHERE h.provider_name = 'atamiras')::text AS price_atamiras,
 
-                MAX(h.sku_price)
-                    FILTER (WHERE h.provider_name = 'medservice') AS price_medservice,
+                MAX(
+                    NULLIF(
+                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
+                        ''
+                    )::numeric
+                ) FILTER (WHERE h.provider_name = 'medservice')::text AS price_medservice,
 
-                MAX(h.sku_price)
-                    FILTER (WHERE h.provider_name = 'stopharm') AS price_stopharm,
+                MAX(
+                    NULLIF(
+                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
+                        ''
+                    )::numeric
+                ) FILTER (WHERE h.provider_name = 'stopharm')::text AS price_stopharm,
 
-                MAX(h.sku_price)
-                    FILTER (WHERE h.provider_name = 'amanat') AS price_amanat,
+                MAX(
+                    NULLIF(
+                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
+                        ''
+                    )::numeric
+                ) FILTER (WHERE h.provider_name = 'amanat')::text AS price_amanat,
 
-                MAX(h.sku_price)
-                    FILTER (WHERE h.provider_name = 'rauza') AS price_rauza
+                MAX(
+                    NULLIF(
+                        REPLACE(REPLACE(TRIM(h.sku_price), ' ', ''), ',', '.'),
+                        ''
+                    )::numeric
+                ) FILTER (WHERE h.provider_name = 'rauza')::text AS price_rauza
 
             FROM hourly_products h
             JOIN LATERAL jsonb_array_elements_text(h.sku_barcodes) AS b(code) ON TRUE
@@ -1245,6 +1282,8 @@ class ProductCompareService:
             WHERE
                 h.sku_barcodes IS NOT NULL
                 AND jsonb_array_length(h.sku_barcodes) > 0
+                AND b.code IS NOT NULL
+                AND b.code <> ''
 
             GROUP BY pc.id
         """))
