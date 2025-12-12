@@ -1214,11 +1214,20 @@ class ProductCompareService:
 
     @staticmethod
     def rebuild_from_hourly(db: Session) -> None:
-        # 1️⃣ чистим витрину
+        # =========================
+        # 1️⃣ ЧИСТИМ ВИТРИНУ
+        # =========================
         db.execute(text("TRUNCATE TABLE product_compare"))
         db.commit()
 
-        # 2️⃣ наполняем витрину
+        # =========================
+        # 2️⃣ НАПОЛНЯЕМ ВИТРИНУ
+        # =========================
+        # ВАЖНО:
+        # - sku_price в hourly = VARCHAR
+        # - regex (~) работает ТОЛЬКО с TEXT
+        # - numeric нужен ТОЛЬКО для MAX()
+        # - результат ВСЕГДА приводим к TEXT
         db.execute(text("""
             INSERT INTO product_compare (
                 barcode,
@@ -1236,40 +1245,45 @@ class ProductCompareService:
                 MAX(
                     CASE
                         WHEN h.provider_name = 'atamiras'
-                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
-                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                             AND h.sku_price IS NOT NULL
+                             AND h.sku_price::text ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price::text, ',', '.')::numeric
                     END
                 )::text AS price_atamiras,
 
                 MAX(
                     CASE
                         WHEN h.provider_name = 'medservice'
-                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
-                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                             AND h.sku_price IS NOT NULL
+                             AND h.sku_price::text ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price::text, ',', '.')::numeric
                     END
                 )::text AS price_medservice,
 
                 MAX(
                     CASE
                         WHEN h.provider_name = 'stopharm'
-                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
-                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                             AND h.sku_price IS NOT NULL
+                             AND h.sku_price::text ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price::text, ',', '.')::numeric
                     END
                 )::text AS price_stopharm,
 
                 MAX(
                     CASE
                         WHEN h.provider_name = 'amanat'
-                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
-                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                             AND h.sku_price IS NOT NULL
+                             AND h.sku_price::text ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price::text, ',', '.')::numeric
                     END
                 )::text AS price_amanat,
 
                 MAX(
                     CASE
                         WHEN h.provider_name = 'rauza'
-                             AND h.sku_price ~ '^[0-9]+([.,][0-9]+)?$'
-                        THEN REPLACE(h.sku_price, ',', '.')::numeric
+                             AND h.sku_price IS NOT NULL
+                             AND h.sku_price::text ~ '^[0-9]+([.,][0-9]+)?$'
+                        THEN REPLACE(h.sku_price::text, ',', '.')::numeric
                     END
                 )::text AS price_rauza
 
@@ -1286,6 +1300,7 @@ class ProductCompareService:
 
             GROUP BY pc.id
         """))
+
         db.commit()
         
 
