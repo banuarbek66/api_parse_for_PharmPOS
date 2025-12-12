@@ -753,6 +753,8 @@ class SyncService:
         HourlyRepo.clear_table(db)
         return True
 
+def to_str(val):
+    return str(val) if val is not None else None
 
 # ============================================================
 # PRODUCT SERVICE
@@ -794,8 +796,8 @@ class ProductService:
                     sku_uid=item.sku_uid,
                     sku_name=item.sku_name,
                     sku_barcode=matched,
-                    sku_price=item.sku_price,
-                    sku_stock=item.sku_stock,
+                    sku_price=to_str(item.sku_price),
+                    sku_stock=to_str(item.sku_stock),
                     sku_step=item.sku_step,
                     unit=item.unit,
                     min_order=item.min_order,
