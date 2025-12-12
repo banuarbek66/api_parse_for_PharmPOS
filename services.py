@@ -1227,7 +1227,7 @@ class ProductCompareService:
         # - sku_price в hourly = VARCHAR
         # - regex (~) работает ТОЛЬКО с TEXT
         # - numeric нужен ТОЛЬКО для MAX()
-        # - результат ВСЕГДА приводим к TEXT
+        # - результат ВСЕГДА приводим к TEXT123
         db.execute(text("""
             INSERT INTO product_compare (
                 barcode,
