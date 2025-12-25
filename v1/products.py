@@ -16,6 +16,7 @@ def get_product_by_barcode(
         description="Город (необязательно). Если указан — вернёт данные только по этому городу",
         example="almaty"
     ),
+    provider_name: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -29,12 +30,15 @@ def get_product_by_barcode(
 
     barcode = sku_barcode.strip()
     city = city.strip().lower() if city else None
-
+    
     results = ProductService.get_by_barcode(
         db=db,
         barcode=barcode,
-        city=city
+        city=city,
+        provider_name=provider_name,
     )
+    
+
 
     return {
         "sku_barcode": barcode,

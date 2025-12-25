@@ -763,14 +763,14 @@ def to_str(val):
 class ProductService:
 
     @staticmethod
-    def get_by_barcode(db: Session, barcode: str, city: Optional[str] = None) -> List[AggregatedItem]:
+    def get_by_barcode(db: Session, barcode: str, city: Optional[str] = None, provider_name: Optional[str] = None) -> List[AggregatedItem]:
 
         # 1) HOURLY
-        items = HourlyRepo.get_latest_by_barcode(db, barcode, city=city)
+        items = HourlyRepo.get_latest_by_barcode(db, barcode, city=city, provider_name=provider_name)
 
         # 2) DAILY fallback
         if not items:
-            items = DailyRepo.get_latest_by_barcode(db, barcode, city=city)
+            items = DailyRepo.get_latest_by_barcode(db, barcode, city=city, provider_name=provider_name)
 
         result: List[AggregatedItem] = []
 

@@ -254,7 +254,8 @@ class HourlyRepo:
     def get_latest_by_barcode(
         db: Session,
         barcode: str,
-        city: Optional[str] = None
+        city: Optional[str] = None,
+        provider_name: Optional[str] = None,
     ) -> List[HourlyProduct]:
 
         barcode_json = [str(barcode)]
@@ -271,6 +272,9 @@ class HourlyRepo:
 
         if city:
             base_query = base_query.filter(HourlyProduct.city == city)
+        
+        if provider_name:
+            base_query = base_query.filter(HourlyProduct.provider_name==provider_name)
 
         subquery = (
             base_query
@@ -354,7 +358,8 @@ class DailyRepo:
     def get_latest_by_barcode(
         db: Session,
         barcode: str,
-        city: Optional[str] = None
+        city: Optional[str] = None,
+        provider_name: Optional[str] = None,
     ) -> List[DailyProduct]:
 
         barcode_json = [str(barcode)]
@@ -370,6 +375,9 @@ class DailyRepo:
 
         if city:
             base_query = base_query.filter(DailyProduct.city == city)
+        
+        if provider_name: 
+            base_query = base_query.filter(DailyProduct.provider_name==provider_name)
 
         subquery = (
             base_query
