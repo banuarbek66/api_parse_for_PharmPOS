@@ -128,7 +128,7 @@ class HourlyProduct(Base):
     __tablename__ = "hourly_products"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True
     )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
@@ -156,8 +156,7 @@ class HourlyProduct(Base):
     sku: Mapped[Optional[str]] = mapped_column(String(255))
     sku_serial: Mapped[Optional[str]] = mapped_column(String(255))
 
-    sku_barcodes: Mapped[Optional[List[str]]] = mapped_column(JSONB)
-
+    sku_barcodes: Mapped[Optional[List[str]]] = mapped_column(JSONB, index=True)
     sku_srok: Mapped[Optional[str]] = mapped_column(String(255))
     sku_step: Mapped[Optional[str]] = mapped_column(String(255))
     sku_marker: Mapped[Optional[str]] = mapped_column(String(255))
@@ -178,7 +177,7 @@ class DailyProduct(Base):
     __tablename__ = "daily_products"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True
     )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
@@ -201,7 +200,7 @@ class DailyProduct(Base):
     sku: Mapped[Optional[str]] = mapped_column(String(255))
     sku_serial: Mapped[Optional[str]] = mapped_column(String(255))
 
-    sku_barcodes: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    sku_barcodes: Mapped[Optional[List[str]]] = mapped_column(JSONB, index=True)
 
     sku_srok: Mapped[Optional[str]] = mapped_column(String(255))
     sku_step: Mapped[Optional[str]] = mapped_column(String(255))
@@ -298,7 +297,7 @@ class ProductCanonical(Base):
 class BarcodeAlias(Base):
     __tablename__ = "barcode_aliases"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True)
 
     provider_name: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     barcode: Mapped[str] = mapped_column(String(255), index=True)
@@ -351,11 +350,13 @@ class PostProcessState(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False),
         nullable=True,
+        index=True
     )
 
     last_hourly_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False),
         nullable=True,
+        index=True
     )
 
     updated_at: Mapped[datetime] = mapped_column(
