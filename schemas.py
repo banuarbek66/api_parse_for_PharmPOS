@@ -5,8 +5,8 @@
 
 from typing import List, Optional
 from datetime import datetime, date
-from pydantic import BaseModel
 from uuid import UUID
+from pydantic import BaseModel
 
 
 # ============================================================
@@ -15,18 +15,22 @@ from uuid import UUID
 
 class SupplierMappingBase(BaseModel):
     provider_name: str
-    format: str = "json"
 
+    # json | xml | csv | excel
+    format: str = "json"
     items_path: Optional[str] = None
 
+    # city logic
     city_path: Optional[str] = None
     city_in_params: bool = False
     city_in_body: bool = False
     city_in_headers: bool = False
 
+    # producer info
     producer: Optional[str] = None
     producer_country: Optional[str] = None
 
+    # sku fields
     sku_uid: Optional[str] = None
     sku_name: Optional[str] = None
     sku_price: Optional[str] = None
@@ -64,7 +68,11 @@ class SupplierMappingRead(SupplierMappingBase):
 class SupplierBase(BaseModel):
     provider_name: str
     provider_bin: Optional[str] = None
+    city_param_name: Optional[str] = "city_id"
 
+    # -------------------------------
+    # HTTP API URLS
+    # -------------------------------
     json_url_get_price: Optional[str] = None
     json_url_get_address: Optional[str] = None
     json_url_get_order: Optional[str] = None
@@ -76,7 +84,18 @@ class SupplierBase(BaseModel):
     login: Optional[str] = None
     password: Optional[str] = None
 
-    city_param_name: Optional[str] = "city_id"
+    # -------------------------------
+    # FTP / SFTP
+    # -------------------------------
+    ftp_host: Optional[str] = None
+    ftp_port: Optional[int] = 21
+    ftp_login: Optional[str] = None
+    ftp_password: Optional[str] = None
+    ftp_path: Optional[str] = None
+
+    # ftp | sftp
+    ftp_type: Optional[str] = None
+
     is_active: bool = True
 
 
@@ -114,12 +133,13 @@ class SupplierCityRead(SupplierCityBase):
 
 
 # ============================================================
-# 4. Продукт (Hourly / Daily)
+# 4. Продукты (Hourly / Daily)
 # ============================================================
 
 class ProductBase(BaseModel):
     provider_name: str
     city: Optional[str] = None
+
     producer: Optional[str] = None
     producer_country: Optional[str] = None
 
@@ -130,7 +150,6 @@ class ProductBase(BaseModel):
 
     sku: Optional[str] = None
     sku_serial: Optional[str] = None
-
     sku_barcodes: Optional[List[str]] = None
 
     sku_srok: Optional[str] = None
@@ -139,7 +158,7 @@ class ProductBase(BaseModel):
     sku_pack: Optional[str] = None
     sku_box: Optional[str] = None
 
-    unit: Optional[str] = "упаковка"
+    unit: Optional[str] = None
     min_order: Optional[str] = None
 
 
@@ -165,7 +184,7 @@ class DailyProductRead(ProductBase):
 
 
 # ============================================================
-# 5. AggregatedItem
+# 5. Aggregated Item (ответ по баркоду)
 # ============================================================
 
 class AggregatedItem(BaseModel):
@@ -242,7 +261,7 @@ class SupplierUnitCreate(BaseModel):
     normalized_unit: str
 
 
-class SupplierUnitOut(BaseModel):
+class SupplierUnitRead(BaseModel):
     id: int
     provider_name: str
     supplier_unit: str
@@ -253,10 +272,9 @@ class SupplierUnitOut(BaseModel):
         from_attributes = True
 
 
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
-
+# ============================================================
+# 9. Supplier Srok
+# ============================================================
 
 class SupplierSrokBase(BaseModel):
     provider_name: str
@@ -269,9 +287,10 @@ class SupplierSrokCreate(SupplierSrokBase):
 
 class SupplierSrokUpdate(BaseModel):
     provider_srok_raw: Optional[str] = None
+    normalized_srok: Optional[str] = None
 
 
-class SupplierSrokResponseSchema(BaseModel):
+class SupplierSrokRead(BaseModel):
     id: int
     provider_name: str
     provider_srok_raw: str
@@ -279,4 +298,4 @@ class SupplierSrokResponseSchema(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True

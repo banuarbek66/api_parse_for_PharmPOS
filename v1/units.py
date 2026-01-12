@@ -7,12 +7,12 @@ import schemas
 import models
 router = APIRouter(prefix="/v1/units", tags=["Units"])
 
-@router.post("/", response_model=schemas.SupplierUnitOut)
+@router.post("/", response_model=schemas.SupplierUnitRead)
 def create_unit(data: schemas.SupplierUnitCreate, db: Session = Depends(get_db)):
     return core.create_or_update_supplier_unit(db, data)
 
 
-@router.get("/", response_model=list[schemas.SupplierUnitOut])
+@router.get("/", response_model=list[schemas.SupplierUnitRead])
 def list_units(
     provider_name: str | None = None,
     db: Session = Depends(get_db)

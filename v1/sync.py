@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from deps import get_db
 from services import SyncService, PostProcessService
 from repositories import SupplierRepo
-
+from services import StockMovementService
+from datetime import datetime
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
 
@@ -75,3 +76,9 @@ def run_postprocess(
     db: Session = Depends(get_db),
 ):
     return PostProcessService.rebuild_all(db)
+
+@router.post("/stockmovement")
+def run_stockmovement(db: Session = Depends(get_db)):
+    a = StockMovementService.build_hourly_movements_all(db)
+
+    return a

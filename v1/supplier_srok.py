@@ -9,7 +9,7 @@ from utils import normalize_srok
 from schemas import (
     SupplierSrokCreate,
     SupplierSrokUpdate,
-    SupplierSrokResponseSchema,
+    SupplierSrokBase as SupplierSrokResponseSchema,
 )
 
 router = APIRouter(prefix="/supplier-srok", tags=["Supplier Srok"])
