@@ -297,7 +297,7 @@ class ProductCanonical(Base):
 class BarcodeAlias(Base):
     __tablename__ = "barcode_aliases"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True),primary_key=True, default=uuid.uuid4)
 
     provider_name: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     barcode: Mapped[str] = mapped_column(String(255), index=True)
