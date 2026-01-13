@@ -10,6 +10,7 @@ from models import (
     ProductCompare,
     SupplierSrokResponse
 )
+from stock_movement_model import StockMovement
 
 # ============================================================
 # SUPPLIERS
@@ -252,7 +253,13 @@ class ProductCompareAdmin(ModelView, model=ProductCompare):
     can_create = False
     can_edit = False
     can_delete = False
+class StockMovementAdmin(ModelView, model=StockMovement):
+    name= "Stock Movement"
 
+    column_exclude_list = [StockMovement.canonical_id]
+    can_create = False
+    can_edit=False
+    can_delete=False
 
 class SupllierSrokAdmin(ModelView, model=SupplierSrokResponse):
     name='Suplier Srok'
@@ -266,3 +273,4 @@ class SupllierSrokAdmin(ModelView, model=SupplierSrokResponse):
         SupplierSrokResponse.provider_srok_raw,
         SupplierSrokResponse.normalized_srok,
     ]
+

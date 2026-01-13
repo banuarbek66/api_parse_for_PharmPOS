@@ -79,7 +79,8 @@ from views import (
     HourlyProductAdmin,
     DailyProductAdmin,
     ProductCompareAdmin,
-    SupllierSrokAdmin
+    SupllierSrokAdmin,
+    StockMovementAdmin
 )
 
 
@@ -95,4 +96,5 @@ admin.add_view(SupllierSrokAdmin)
 admin.add_view(SupplierUnitAdmin)
 admin.add_view(HourlyProductAdmin)
 admin.add_view(DailyProductAdmin)
+admin.add_view(StockMovementAdmin)
 admin.add_view(ProductCompareAdmin)
