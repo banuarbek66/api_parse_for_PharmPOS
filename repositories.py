@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Tuple, Iterable
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, text, select, or_, and_
+from sqlalchemy import func, text, select, or_, and_, cast as sqcast, Date, Time
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import CursorResult
 from models import (
@@ -29,7 +29,7 @@ from models import (
 from utils import clean_unit
 
 
-from datetime import datetime
+
 from typing import Iterable, Optional
 from uuid import UUID
 from sqlalchemy import case
@@ -38,7 +38,7 @@ from sqlalchemy import func, true
 from sqlalchemy.dialects.postgresql import UUID as SqlUUID
 from stock_movement_model import StockMovement, StockMovementType
 from stock_movement_cursor import StockMovementCursor
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 from sqlalchemy import values as sa_values
 # ============================================================
 # SUPPLIER UNIT REPO — нормализация единиц измерения
@@ -265,27 +265,25 @@ class HourlyRepo:
         db.commit()
 
     @staticmethod
-    def get_all_after_23(
-        db: Session,
-        *,
-        target_date: datetime,
-    ):
+    def get_all_after_23(db: Session) -> List[HourlyProduct]:
         """
-        Возвращает HourlyProduct, созданные после 23:00 указанной даты.
+        ORM-only.
+        Корректно для PostgreSQL.
+        Совпадает с scheduler (Asia/Almaty).
+        Работает при created_at в UTC или naive.
         """
 
-        start_dt = datetime.combine(
-            target_date.date(),
-            time(23, 0, 0),
-        )
-
-        end_dt = start_dt + timedelta(days=1)
+        created_at_kz = func.timezone("Asia/Almaty", HourlyProduct.created_at)
+        now_kz = func.timezone("Asia/Almaty", func.now())
 
         return (
             db.query(HourlyProduct)
             .filter(
-                HourlyProduct.created_at >= start_dt,
-                HourlyProduct.created_at < end_dt,
+                and_(
+                    sqcast(created_at_kz, Date) == sqcast(now_kz, Date),
+                    sqcast(created_at_kz, Time) >= time(1, 0),
+                    sqcast(created_at_kz, Time) <= time(23, 50),
+                )
             )
             .all()
         )

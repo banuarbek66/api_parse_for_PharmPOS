@@ -172,6 +172,7 @@ class HourlyProductAdmin(ModelView, model=HourlyProduct):
     column_searchable_list = [
         "sku_name",
         "sku_barcodes",
+        "created_at",
     ]
 
     column_sortable_list = ["id", "created_at"]
@@ -214,6 +215,7 @@ class DailyProductAdmin(ModelView, model=DailyProduct):
     column_searchable_list = [
         "sku_name",
         "sku_barcodes",
+        "snapshot_date"
     ]
 
     column_sortable_list = ["id", "created_at"]

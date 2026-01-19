@@ -17,7 +17,7 @@ class StockMovementCursor(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
 
     provider_name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
-    last_hourly_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    last_hourly_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, index=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
 

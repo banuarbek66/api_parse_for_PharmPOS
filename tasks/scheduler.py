@@ -200,6 +200,7 @@ def daily_snapshot_job():
             _pid_log(f"❌ [TASK] Daily snapshot failed: {e}")
             raise
         finally:
+            db.rollback()
             _advisory_unlock(db, LOCK_KEY)
 
 
@@ -267,7 +268,7 @@ def start_scheduler():
     # ⏰ Каждый час → HOURLY SYNC
     scheduler.add_job(
         hourly_sync_job,
-        CronTrigger(minute=0),
+        CronTrigger(minute=46),
         id="hourly_sync",
         replace_existing=True,
         max_instances=1,
@@ -299,7 +300,7 @@ def start_scheduler():
     # 🕚 23:50 → DAILY SNAPSHOT
     scheduler.add_job(
         daily_snapshot_job,
-        CronTrigger(hour=23, minute=50),
+        CronTrigger(minute=15),
         id="daily_snapshot",
         replace_existing=True,
         max_instances=1,

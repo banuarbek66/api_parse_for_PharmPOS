@@ -861,7 +861,7 @@ class SyncService:
     # ---------------------------------------------------------
     @staticmethod
     def run_daily_snapshot(db: Session) -> int:
-        hourly = HourlyRepo.get_all_after_23(db, target_date=datetime.utcnow())
+        hourly = HourlyRepo.get_all_after_23(db)
         daily: List[DailyProduct] = []
 
         for h in hourly:
