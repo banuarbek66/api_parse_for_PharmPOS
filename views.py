@@ -281,4 +281,4 @@ class ClietnAdmin(ModelView, model=Client):
 
     column_list = [Client.uid, Client.name, Client.bin]
 
-    form_columns = [Client.uid, Client.name, Client.bin]
+    form_columns = [Client.name, Client.bin]
