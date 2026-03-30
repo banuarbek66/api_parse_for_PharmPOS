@@ -5,44 +5,39 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Tuple, Iterable
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
+from typing import Dict, Iterable, List, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import func, text, select, or_, and_, cast as sqcast, Date, Time
-from sqlalchemy.orm import Session
+from sqlalchemy import Date, Time, and_, case
+from sqlalchemy import cast as sqcast
+from sqlalchemy import func, or_, select, text, true
+from sqlalchemy import values as sa_values
+from sqlalchemy.dialects.postgresql import UUID as SqlUUID
 from sqlalchemy.engine import CursorResult
-from models import (
-    Supplier,
-    SupplierMapping,
-    HourlyProduct,
-    DailyProduct,
-    SupplierCity,
-    CityResponse,
-    SupplierUnit,
-    ProductCanonical,
-    BarcodeAlias,
-    SupplierSrokResponse,
-    PostProcessState
-)
+from sqlalchemy.orm import Session
 
+from models import (
+    BarcodeAlias,
+    CityResponse,
+    DailyProduct,
+    HourlyProduct,
+    PostProcessState,
+    ProductCanonical,
+    Supplier,
+    SupplierCity,
+    SupplierMapping,
+    SupplierSrokResponse,
+    SupplierUnit,
+)
+from stock_movement_cursor import StockMovementCursor
+from stock_movement_model import StockMovement, StockMovementType
 from utils import clean_unit
 
-
-
-from typing import Iterable, Optional
-from uuid import UUID
-from sqlalchemy import case
-from sqlalchemy.orm import Session
-from sqlalchemy import func, true
-from sqlalchemy.dialects.postgresql import UUID as SqlUUID
-from stock_movement_model import StockMovement, StockMovementType
-from stock_movement_cursor import StockMovementCursor
-from datetime import datetime, time, timedelta, date
-from sqlalchemy import values as sa_values
 # ============================================================
 # SUPPLIER UNIT REPO — нормализация единиц измерения
 # ============================================================
+
 
 class SupplierUnitRepo:
 
@@ -64,7 +59,7 @@ class SupplierUnitRepo:
             db.query(SupplierUnit)
             .filter(
                 SupplierUnit.provider_name == provider,
-                func.lower(SupplierUnit.supplier_unit) == cleaned
+                func.lower(SupplierUnit.supplier_unit) == cleaned,
             )
             .first()
         )
@@ -76,7 +71,7 @@ class SupplierUnitRepo:
             db.query(SupplierUnit)
             .filter(
                 SupplierUnit.provider_name == provider,
-                SupplierUnit.supplier_unit.ilike(f"%{cleaned}%")
+                SupplierUnit.supplier_unit.ilike(f"%{cleaned}%"),
             )
             .first()
         )
@@ -85,6 +80,7 @@ class SupplierUnitRepo:
 # ============================================================
 # SUPPLIER REPO
 # ============================================================
+
 
 class SupplierRepo:
 
@@ -103,9 +99,7 @@ class SupplierRepo:
     @staticmethod
     def get_by_name(db: Session, provider_name: str) -> Optional[Supplier]:
         return (
-            db.query(Supplier)
-            .filter(Supplier.provider_name == provider_name)
-            .first()
+            db.query(Supplier).filter(Supplier.provider_name == provider_name).first()
         )
 
     @staticmethod
@@ -128,6 +122,7 @@ class SupplierRepo:
 # ============================================================
 # MAPPING REPO
 # ============================================================
+
 
 class MappingRepo:
 
@@ -164,10 +159,13 @@ class MappingRepo:
 # SUPPLIER CITY REPO — старый механизм
 # ============================================================
 
+
 class SupplierCityRepo:
 
     @staticmethod
-    def get(db: Session, provider_name: str, supplier_city_code: str) -> Optional[SupplierCity]:
+    def get(
+        db: Session, provider_name: str, supplier_city_code: str
+    ) -> Optional[SupplierCity]:
         return (
             db.query(SupplierCity)
             .filter(
@@ -178,7 +176,9 @@ class SupplierCityRepo:
         )
 
     @staticmethod
-    def create(db: Session, provider_name: str, supplier_city_code: str, normalized_city: str) -> SupplierCity:
+    def create(
+        db: Session, provider_name: str, supplier_city_code: str, normalized_city: str
+    ) -> SupplierCity:
         city = SupplierCity(
             provider_name=provider_name,
             supplier_city_code=supplier_city_code,
@@ -190,16 +190,21 @@ class SupplierCityRepo:
         return city
 
     @staticmethod
-    def get_or_create(db: Session, provider_name: str, supplier_city_code: str, normalized_city: str) -> SupplierCity:
+    def get_or_create(
+        db: Session, provider_name: str, supplier_city_code: str, normalized_city: str
+    ) -> SupplierCity:
         city = SupplierCityRepo.get(db, provider_name, supplier_city_code)
         if city:
             return city
-        return SupplierCityRepo.create(db, provider_name, supplier_city_code, normalized_city)
+        return SupplierCityRepo.create(
+            db, provider_name, supplier_city_code, normalized_city
+        )
 
 
 # ============================================================
 # CITY RESPONSE — главная логика городов
 # ============================================================
+
 
 class CityResponseRepo:
 
@@ -255,6 +260,7 @@ class CityResponseRepo:
 # HOURLY PRODUCTS
 # ============================================================
 
+
 class HourlyRepo:
 
     @staticmethod
@@ -297,50 +303,62 @@ class HourlyRepo:
     def get_latest_by_barcode(
         db: Session,
         barcode: str,
+        client_uid: UUID | None,
         city: Optional[str] = None,
         provider_name: Optional[str] = None,
     ) -> List[HourlyProduct]:
 
         barcode_json = [str(barcode)]
 
-        base_query = (
-            db.query(
-                HourlyProduct.provider_name,
-                HourlyProduct.sku_uid,
-                HourlyProduct.city,
-                func.max(HourlyProduct.created_at).label("max_date")
-            )
-            .filter(HourlyProduct.sku_barcodes.contains(barcode_json))
-        )
+        # 🔹 БАЗОВЫЙ QUERY
+        base_query = db.query(
+            HourlyProduct.provider_name,
+            HourlyProduct.city,
+            HourlyProduct.sku_uid,
+            func.max(HourlyProduct.created_at).label("max_date"),
+        ).filter(HourlyProduct.sku_barcodes.contains(barcode_json))
 
+        # 🔹 MULTI-TENANT (client + global)
+        if client_uid:
+            base_query = base_query.filter(
+                HourlyProduct.client_uid == client_uid,
+            )
+        if not client_uid:
+            base_query = base_query.filter(
+                HourlyProduct.client_uid.is_(None),
+            )
+
+        # 🔹 ДОП ФИЛЬТРЫ
         if city:
             base_query = base_query.filter(HourlyProduct.city == city)
 
         if provider_name:
             base_query = base_query.filter(HourlyProduct.provider_name == provider_name)
 
-        subquery = (
-            base_query
-            .group_by(
-                HourlyProduct.provider_name,
-                HourlyProduct.sku_uid,
-                HourlyProduct.city
-            )
-            .subquery()
-        )
+        # 🔹 SUBQUERY (ключевая агрегация)
+        subquery = base_query.group_by(
+            HourlyProduct.provider_name,
+            HourlyProduct.city,
+            HourlyProduct.sku_uid,
+        ).subquery()
 
-        return (
+        # 🔹 JOIN (NULL-safe по city)
+        query = (
             db.query(HourlyProduct)
             .join(
                 subquery,
-                (HourlyProduct.provider_name == subquery.c.provider_name) &
-                (HourlyProduct.sku_uid == subquery.c.sku_uid) &
-                (HourlyProduct.city == subquery.c.city) &
-                (HourlyProduct.created_at == subquery.c.max_date)
+                and_(
+                    HourlyProduct.provider_name == subquery.c.provider_name,
+                    HourlyProduct.sku_uid == subquery.c.sku_uid,
+                    func.coalesce(HourlyProduct.city, "")
+                    == func.coalesce(subquery.c.city, ""),  # 🔥 ключевой фикс
+                    HourlyProduct.created_at == subquery.c.max_date,
+                ),
             )
             .order_by(HourlyProduct.provider_name)
-            .all()
         )
+
+        return query.all()
 
     @staticmethod
     def get_for_period(
@@ -367,15 +385,19 @@ class HourlyRepo:
     @staticmethod
     def get_latest(db: Session):
         # Возвращает строки (Row), как в твоём SQL-использовании
-        return db.execute(text("""
+        return db.execute(
+            text(
+                """
             SELECT DISTINCT ON (b.code)
                    h.*
             FROM hourly_products h
             JOIN LATERAL jsonb_array_elements_text(h.sku_barcodes) AS b(code) ON TRUE
             WHERE jsonb_array_length(h.sku_barcodes) > 0
             ORDER BY b.code, h.created_at DESC;
-        """)).all()
-    
+        """
+            )
+        ).all()
+
     @staticmethod
     def get_newer_than(
         db: Session,
@@ -387,7 +409,7 @@ class HourlyRepo:
             q = q.filter(HourlyProduct.created_at > last_hourly_at)
 
         return q.order_by(HourlyProduct.created_at.asc()).all()
-    
+
     @staticmethod
     def get_prev_snapshot_for_canonical(
         db: Session,
@@ -413,7 +435,7 @@ class HourlyRepo:
             q = q.filter(HourlyProduct.city == city)
 
         return q.order_by(HourlyProduct.created_at.desc()).first()
-    
+
     @staticmethod
     def attach_canonical_ids(db: Session) -> int:
         """
@@ -424,9 +446,7 @@ class HourlyRepo:
         """
 
         rows = (
-            db.query(HourlyProduct)
-            .filter(HourlyProduct.canonical_id.is_(None))
-            .all()
+            db.query(HourlyProduct).filter(HourlyProduct.canonical_id.is_(None)).all()
         )
 
         updated = 0
@@ -440,9 +460,7 @@ class HourlyRepo:
                 if not s.isdigit():
                     continue
 
-                canonical_id = BarcodeAliasRepo.get_canonical_id_by_barcode(
-                    db, s
-                )
+                canonical_id = BarcodeAliasRepo.get_canonical_id_by_barcode(db, s)
                 if canonical_id:
                     break
 
@@ -451,10 +469,9 @@ class HourlyRepo:
                 updated += 1
         if updated:
             db.flush()
-        
-            
 
         return updated
+
     @staticmethod
     def get_changed_canonical_ids(
         db: Session,
@@ -465,9 +482,7 @@ class HourlyRepo:
         Возвращает список canonical_id,
         которые затронуты новыми hourly записями
         """
-        q = db.query(
-            HourlyProduct.canonical_id
-        ).filter(
+        q = db.query(HourlyProduct.canonical_id).filter(
             HourlyProduct.canonical_id.is_not(None)
         )
 
@@ -476,11 +491,14 @@ class HourlyRepo:
 
         rows = q.distinct().all()
         return [r[0] for r in rows if r[0] is not None]
+
     @staticmethod
-    def get_newer_than_for_provider(db: Session, *, provider_name: str, since: datetime | None):
-        q = db.query(HourlyProduct).filter(HourlyProduct.provider_name==provider_name)
+    def get_newer_than_for_provider(
+        db: Session, *, provider_name: str, since: datetime | None
+    ):
+        q = db.query(HourlyProduct).filter(HourlyProduct.provider_name == provider_name)
         if since:
-            q = q.filter(HourlyProduct.created_at>since)
+            q = q.filter(HourlyProduct.created_at > since)
         return q.order_by(HourlyProduct.created_at.asc()).all()
 
     @staticmethod
@@ -501,26 +519,23 @@ class HourlyRepo:
         # -----------------------------
         # BASE QUERY WITH WINDOW
         # -----------------------------
-        base_q = (
-            db.query(
-                HourlyProduct.canonical_id.label("canonical_id"),
-                HourlyProduct.city.label("city"),
-                HourlyProduct.sku_stock.label("sku_stock"),
-                func.row_number()
-                .over(
-                    partition_by=(
-                        HourlyProduct.canonical_id,
-                        HourlyProduct.city,
-                    ),
-                    order_by=HourlyProduct.created_at.desc(),
-                )
-                .label("rn"),
+        base_q = db.query(
+            HourlyProduct.canonical_id.label("canonical_id"),
+            HourlyProduct.city.label("city"),
+            HourlyProduct.sku_stock.label("sku_stock"),
+            func.row_number()
+            .over(
+                partition_by=(
+                    HourlyProduct.canonical_id,
+                    HourlyProduct.city,
+                ),
+                order_by=HourlyProduct.created_at.desc(),
             )
-            .filter(
-                HourlyProduct.provider_name == provider_name,
-                HourlyProduct.created_at < before_dt,
-                HourlyProduct.canonical_id.in_(canonical_ids),
-            )
+            .label("rn"),
+        ).filter(
+            HourlyProduct.provider_name == provider_name,
+            HourlyProduct.created_at < before_dt,
+            HourlyProduct.canonical_id.in_(canonical_ids),
         )
 
         # -----------------------------
@@ -571,7 +586,7 @@ class HourlyRepo:
             result[(r.canonical_id, r.city)] = r.sku_stock
 
         return result
-    
+
     @staticmethod
     def iter_newer_than_for_provider(
         db: Session,
@@ -585,10 +600,7 @@ class HourlyRepo:
         НЕ грузит всё в память.
         """
 
-        q = (
-            db.query(HourlyProduct)
-            .filter(HourlyProduct.provider_name == provider_name)
-        )
+        q = db.query(HourlyProduct).filter(HourlyProduct.provider_name == provider_name)
 
         if since:
             q = q.filter(HourlyProduct.created_at > since)
@@ -597,28 +609,22 @@ class HourlyRepo:
 
         offset = 0
         while True:
-            batch = (
-                q.limit(chunk_size)
-                 .offset(offset)
-                 .all()
-            )
+            batch = q.limit(chunk_size).offset(offset).all()
             if not batch:
                 break
 
             yield batch
             offset += chunk_size
+
     @staticmethod
     def get_distinct_providers(db: Session) -> list[str]:
-        return [
-            r[0]
-            for r in db.query(HourlyProduct.provider_name)
-            .distinct()
-            .all()
-        ]
+        return [r[0] for r in db.query(HourlyProduct.provider_name).distinct().all()]
+
 
 # ============================================================
 # DAILY PRODUCTS
 # ============================================================
+
 
 class DailyRepo:
 
@@ -632,14 +638,12 @@ class DailyRepo:
     @staticmethod
     def get_all_after_23(
         db: Session,
-        
     ):
         """
         Возвращает HourlyProduct, созданные после 23:00 указанной даты.
         """
         return db.query(DailyProduct).all()
 
-        
     @staticmethod
     def clear_by_date(db: Session, snapshot_date):
         db.query(DailyProduct).filter(
@@ -651,20 +655,30 @@ class DailyRepo:
     def get_latest_by_barcode(
         db: Session,
         barcode: str,
+        client_uid: UUID | None,
         city: Optional[str] = None,
         provider_name: Optional[str] = None,
     ) -> List[DailyProduct]:
 
         barcode_json = [str(barcode)]
 
-        base_query = (
-            db.query(
+        if not client_uid:
+            base_query = db.query(
                 DailyProduct.provider_name,
                 DailyProduct.city,
-                func.max(DailyProduct.created_at).label("max_date")
+                func.max(DailyProduct.created_at).label("max_date"),
+            ).filter(DailyProduct.sku_barcodes.contains(barcode_json))
+        else:
+            base_query = db.query(
+                DailyProduct.provider_name,
+                DailyProduct.city,
+                func.max(DailyProduct.created_at).label("max_date"),
+            ).filter(
+                and_(
+                    DailyProduct.sku_barcodes.contains(barcode_json),
+                    DailyProduct.client_uid == None,
+                )
             )
-            .filter(DailyProduct.sku_barcodes.contains(barcode_json))
-        )
 
         if city:
             base_query = base_query.filter(DailyProduct.city == city)
@@ -672,22 +686,17 @@ class DailyRepo:
         if provider_name:
             base_query = base_query.filter(DailyProduct.provider_name == provider_name)
 
-        subquery = (
-            base_query
-            .group_by(
-                DailyProduct.provider_name,
-                DailyProduct.city
-            )
-            .subquery()
-        )
+        subquery = base_query.group_by(
+            DailyProduct.provider_name, DailyProduct.city
+        ).subquery()
 
         return (
             db.query(DailyProduct)
             .join(
                 subquery,
-                (DailyProduct.provider_name == subquery.c.provider_name) &
-                (DailyProduct.city == subquery.c.city) &
-                (DailyProduct.created_at == subquery.c.max_date)
+                (DailyProduct.provider_name == subquery.c.provider_name)
+                & (DailyProduct.city == subquery.c.city)
+                & (DailyProduct.created_at == subquery.c.max_date),
             )
             .order_by(DailyProduct.provider_name)
             .all()
@@ -697,7 +706,7 @@ class DailyRepo:
     def get_range(db: Session, start_date, end_date, provider_name=None, city=None):
         q = db.query(DailyProduct).filter(
             DailyProduct.snapshot_date >= start_date,
-            DailyProduct.snapshot_date <= end_date
+            DailyProduct.snapshot_date <= end_date,
         )
 
         if provider_name:
@@ -713,6 +722,7 @@ class DailyRepo:
 # PRODUCT CANONICAL REPO
 # ============================================================
 
+
 class ProductCanonicalRepo:
 
     @staticmethod
@@ -725,10 +735,7 @@ class ProductCanonicalRepo:
             )
         ).all()
 
-        return {
-            (r.name_key, r.producer): r.id
-            for r in rows if r.name_key
-        }
+        return {(r.name_key, r.producer): r.id for r in rows if r.name_key}
 
     @staticmethod
     def find_by_name_and_producer(
@@ -760,7 +767,7 @@ class ProductCanonicalRepo:
             producer_country=producer_country,
         )
         db.add(obj)
-        
+
         db.flush()
         return obj
 
@@ -768,6 +775,7 @@ class ProductCanonicalRepo:
 # ============================================================
 # BARCODE ALIAS REPO
 # ============================================================
+
 
 class BarcodeAliasRepo:
 
@@ -788,9 +796,7 @@ class BarcodeAliasRepo:
     @staticmethod
     def get_by_barcode(db: Session, barcode: str) -> Optional[BarcodeAlias]:
         return (
-            db.query(BarcodeAlias)
-            .filter(BarcodeAlias.barcode == str(barcode))
-            .first()
+            db.query(BarcodeAlias).filter(BarcodeAlias.barcode == str(barcode)).first()
         )
 
     @staticmethod
@@ -804,9 +810,7 @@ class BarcodeAliasRepo:
         barcode_str = str(barcode).strip()
 
         existing = (
-            db.query(BarcodeAlias)
-            .filter(BarcodeAlias.barcode == barcode_str)
-            .first()
+            db.query(BarcodeAlias).filter(BarcodeAlias.barcode == barcode_str).first()
         )
         if existing:
             # если уже есть — гарантируем canonical_id (не ломая данные)
@@ -823,23 +827,19 @@ class BarcodeAliasRepo:
             canonical_id=canonical_id,
         )
         db.add(obj)
-        
-        
+
         return obj
-    
+
     @staticmethod
     def get_canonical_id_by_barcode(db: Session, barcode: str):
-        rec = (
-            db.query(BarcodeAlias)
-            .filter(BarcodeAlias.barcode == barcode)
-            .first()
-        )
+        rec = db.query(BarcodeAlias).filter(BarcodeAlias.barcode == barcode).first()
         return rec.canonical_id if rec else None
 
 
 # ============================================================
 # SUPPLIER SROK REPO
 # ============================================================
+
 
 class SupplierSrokRepo:
 
@@ -869,14 +869,18 @@ class StockMovementRepo:
         if cur:
             return cur
 
-        cur = StockMovementCursor(provider_name=provider_name, last_hourly_processed_at=None)
+        cur = StockMovementCursor(
+            provider_name=provider_name, last_hourly_processed_at=None
+        )
         db.add(cur)
         db.commit()
         db.refresh(cur)
         return cur
 
     @staticmethod
-    def update_cursor(db: Session, cursor: StockMovementCursor, last_hourly_processed_at: datetime) -> None:
+    def update_cursor(
+        db: Session, cursor: StockMovementCursor, last_hourly_processed_at: datetime
+    ) -> None:
         cursor.last_hourly_processed_at = last_hourly_processed_at
         cursor.updated_at = datetime.utcnow()
         db.commit()
@@ -887,6 +891,7 @@ class StockMovementRepo:
             return
         db.add_all(rows)
         db.commit()
+
     @staticmethod
     def bulk_insert_mappings_no_commit(
         db: Session,
@@ -918,17 +923,16 @@ class StockMovementRepo:
             StockMovement.canonical_id.label("canonical_id"),
             func.min(StockMovement.sku_uid).label("sku_uid"),
             func.min(StockMovement.sku_name).label("sku_name"),
-
             func.coalesce(
-                func.sum(case((StockMovement.delta < 0, -StockMovement.delta), else_=0)),
-                0
+                func.sum(
+                    case((StockMovement.delta < 0, -StockMovement.delta), else_=0)
+                ),
+                0,
             ).label("sold_qty"),
-
             func.coalesce(
                 func.sum(case((StockMovement.delta > 0, StockMovement.delta), else_=0)),
-                0
+                0,
             ).label("restocked_qty"),
-
             func.coalesce(func.sum(StockMovement.delta), 0).label("net_delta"),
         ).filter(
             StockMovement.snapshot_at >= start_dt,
@@ -947,10 +951,14 @@ class StockMovementRepo:
         )
 
         # сортируем по sold_qty desc
-        q = q.order_by(func.coalesce(
-            func.sum(case((StockMovement.delta < 0, -StockMovement.delta), else_=0)),
-            0
-        ).desc())
+        q = q.order_by(
+            func.coalesce(
+                func.sum(
+                    case((StockMovement.delta < 0, -StockMovement.delta), else_=0)
+                ),
+                0,
+            ).desc()
+        )
 
         q = q.limit(limit)
 
@@ -968,8 +976,6 @@ class StockMovementRepo:
             }
             for r in rows
         ]
-    
-
 
 
 class PostProcessStateRepo:
@@ -994,7 +1000,6 @@ class PostProcessStateRepo:
             state = PostProcessState(
                 id=1,
                 status="idle",
-                
                 last_run_at=None,
                 last_hourly_at=None,
             )
@@ -1006,7 +1011,6 @@ class PostProcessStateRepo:
     # -------------------------------------------------
     # STATUS CONTROL
     # -------------------------------------------------
-    
 
     @staticmethod
     def set_success(
@@ -1014,25 +1018,33 @@ class PostProcessStateRepo:
         *,
         last_hourly_at: datetime | None,
     ) -> None:
-        db.execute(text("""
+        db.execute(
+            text(
+                """
             UPDATE postprocess_state
             SET status = 'success',
                 last_run_at = now(),
                 last_hourly_at = :h,
                 updated_at = now()
             WHERE id = 1
-        """), {"h": last_hourly_at})
-        
+        """
+            ),
+            {"h": last_hourly_at},
+        )
 
     @staticmethod
     def set_failed(db: Session) -> None:
-        db.execute(text("""
+        db.execute(
+            text(
+                """
             UPDATE postprocess_state
             SET status = 'failed',
                 updated_at = now()
             WHERE id = 1
-        """))
-        
+        """
+            )
+        )
+
     @staticmethod
     def try_set_running(db: Session) -> bool:
         """
@@ -1053,7 +1065,6 @@ class PostProcessStateRepo:
         state.status = "running"
         state.updated_at = datetime.utcnow()
 
-        
         return True
 
     # -------------------------------------------------
@@ -1076,9 +1087,14 @@ class PostProcessStateRepo:
         """
         Обновляет cursor после успешной обработки
         """
-        db.execute(text("""
+        db.execute(
+            text(
+                """
             UPDATE postprocess_state
             SET last_hourly_at = :hid,
                 updated_at = now()
             WHERE id = 1
-        """), {"hid": last_hourly_at})
+        """
+            ),
+            {"hid": last_hourly_at},
+        )

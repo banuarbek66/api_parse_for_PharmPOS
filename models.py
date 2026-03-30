@@ -4,28 +4,30 @@
 # ============================================================
 
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import List, Optional
+from uuid import UUID as UID
 
 from sqlalchemy import (
-    String,
-    DateTime,
-    Date,
+    BigInteger,
     Boolean,
+    Date,
+    DateTime,
     ForeignKey,
-    Text,
-    Numeric,
     Integer,
+    Numeric,
+    String,
+    Text,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
-
 # ============================================================
 # 1. Supplier Mapping
 # ============================================================
+
 
 class SupplierMapping(Base):
     __tablename__ = "supplier_mapping"
@@ -75,17 +77,23 @@ class SupplierMapping(Base):
 # 2. Supplier
 # ============================================================
 
+
 class Supplier(Base):
     __tablename__ = "suppliers"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    client_uid: Mapped[UID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.uid"), index=True, nullable=True
+    )
 
     provider_name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     provider_bin: Mapped[Optional[str]] = mapped_column(String(20))
 
-    city_param_name: Mapped[Optional[str]] = mapped_column(String(50), default="city_id")
+    city_param_name: Mapped[Optional[str]] = mapped_column(
+        String(50), default="city_id"
+    )
 
     # -------------------------------
     # HTTP API URLS (как было)
@@ -118,11 +126,13 @@ class Supplier(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    client = relationship("Client", back_populates="supplier")
 
 
 # ============================================================
 # 3. Hourly Product
 # ============================================================
+
 
 class HourlyProduct(Base):
     __tablename__ = "hourly_products"
@@ -134,16 +144,19 @@ class HourlyProduct(Base):
     provider_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False
     )
+    client_uid: Mapped[UID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.uid"), index=True, nullable=True
+    )
 
     provider_name: Mapped[str] = mapped_column(String(255), index=True)
     provider_bin: Mapped[Optional[str]] = mapped_column(String(50))
 
     city: Mapped[Optional[str]] = mapped_column(String(100))
     canonical_id: Mapped[UUID | None] = mapped_column(
-    UUID(as_uuid=True),
-    nullable=True,
-    index=True,
-)
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
 
     producer: Mapped[Optional[str]] = mapped_column(String(255))
     producer_country: Mapped[Optional[str]] = mapped_column(String(255))
@@ -167,11 +180,13 @@ class HourlyProduct(Base):
     min_order: Mapped[Optional[str]] = mapped_column(String(255))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    client = relationship("Client", back_populates="hourly")
 
 
 # ============================================================
 # 4. Daily Product
 # ============================================================
+
 
 class DailyProduct(Base):
     __tablename__ = "daily_products"
@@ -182,6 +197,9 @@ class DailyProduct(Base):
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False
+    )
+    client_uid: Mapped[UID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.uid"), index=True, nullable=True
     )
 
     provider_name: Mapped[str] = mapped_column(String(255))
@@ -213,11 +231,13 @@ class DailyProduct(Base):
 
     snapshot_date: Mapped[date] = mapped_column(Date, default=date.today)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    client = relationship("Client", back_populates="daily")
 
 
 # ============================================================
 # 5. City + SupplierUnit
 # ============================================================
+
 
 class SupplierCity(Base):
     __tablename__ = "supplier_cities"
@@ -257,6 +277,7 @@ class SupplierUnit(Base):
 # 6. Product Compare + Canonical
 # ============================================================
 
+
 class ProductCompare(Base):
     __tablename__ = "product_compare"
 
@@ -278,6 +299,7 @@ class ProductCompare(Base):
     price_rauza: Mapped[Optional[str]] = mapped_column(String(500))
     canonical = relationship("ProductCanonical", back_populates="product_compare")
 
+
 class ProductCanonical(Base):
     __tablename__ = "product_canonical"
 
@@ -293,6 +315,7 @@ class ProductCanonical(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     product_compare = relationship("ProductCompare", back_populates="canonical")
+
 
 class BarcodeAlias(Base):
     __tablename__ = "barcode_aliases"
@@ -312,6 +335,7 @@ class BarcodeAlias(Base):
 # ============================================================
 # 7. Supplier Srok Format
 # ============================================================
+
 
 class SupplierSrokResponse(Base):
     __tablename__ = "supplier_srok_response"
@@ -348,15 +372,11 @@ class PostProcessState(Base):
 
     # для метрик / мониторинга
     last_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=False),
-        nullable=True,
-        index=True
+        DateTime(timezone=False), nullable=True, index=True
     )
 
     last_hourly_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=False),
-        nullable=True,
-        index=True
+        DateTime(timezone=False), nullable=True, index=True
     )
 
     updated_at: Mapped[datetime] = mapped_column(
@@ -364,3 +384,15 @@ class PostProcessState(Base):
         default=datetime.utcnow,
         nullable=False,
     )
+
+
+class Client(Base):
+    __tablename__ = "clients"
+    uid: Mapped[UID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String, index=True)
+    bin: Mapped[int] = mapped_column(BigInteger)
+    supplier = relationship("Supplier", back_populates="client")
+    daily = relationship("DailyProduct", back_populates="client")
+    hourly = relationship("HourlyProduct", back_populates="client")

@@ -3,15 +3,16 @@
 # Pydantic СХЕМЫ ДЛЯ PHARM-POS SUPPLIER AGGREGATOR
 # ============================================================
 
+from datetime import date, datetime
 from typing import List, Optional
-from datetime import datetime, date
 from uuid import UUID
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 
 # ============================================================
 # 1. Supplier Mapping
 # ============================================================
+
 
 class SupplierMappingBase(BaseModel):
     provider_name: str
@@ -65,10 +66,12 @@ class SupplierMappingRead(SupplierMappingBase):
 # 2. Supplier
 # ============================================================
 
+
 class SupplierBase(BaseModel):
     provider_name: str
     provider_bin: Optional[str] = None
     city_param_name: Optional[str] = "city_id"
+    client_uid: UUID
 
     # -------------------------------
     # HTTP API URLS
@@ -115,6 +118,7 @@ class SupplierRead(SupplierBase):
 # 3. Supplier City
 # ============================================================
 
+
 class SupplierCityBase(BaseModel):
     provider_name: str
     supplier_city_code: str
@@ -136,8 +140,10 @@ class SupplierCityRead(SupplierCityBase):
 # 4. Продукты (Hourly / Daily)
 # ============================================================
 
+
 class ProductBase(BaseModel):
     provider_name: str
+    client: str
     city: Optional[str] = None
 
     producer: Optional[str] = None
@@ -187,6 +193,7 @@ class DailyProductRead(ProductBase):
 # 5. Aggregated Item (ответ по баркоду)
 # ============================================================
 
+
 class AggregatedItem(BaseModel):
     provider_name: str
     provider_bin: Optional[str] = None
@@ -223,6 +230,7 @@ class ProductByBarcodeResponse(BaseModel):
 # 6. Sync Result
 # ============================================================
 
+
 class SyncResult(BaseModel):
     provider_name: str
     processed: int
@@ -235,6 +243,7 @@ class SyncResult(BaseModel):
 # ============================================================
 # 7. City Response
 # ============================================================
+
 
 class CityResponseCreate(BaseModel):
     provider_name: str
@@ -254,6 +263,7 @@ class CityResponseRead(CityResponseCreate):
 # ============================================================
 # 8. Supplier Unit
 # ============================================================
+
 
 class SupplierUnitCreate(BaseModel):
     provider_name: str
@@ -275,6 +285,7 @@ class SupplierUnitRead(BaseModel):
 # ============================================================
 # 9. Supplier Srok
 # ============================================================
+
 
 class SupplierSrokBase(BaseModel):
     provider_name: str
@@ -299,3 +310,10 @@ class SupplierSrokRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ClientResponse(BaseModel):
+    uid: UUID
+
+    name: str
+    bin: int

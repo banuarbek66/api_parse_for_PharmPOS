@@ -2,71 +2,63 @@
 # ============================================================
 # BUSINESS LOGIC FOR PHARM-POS SUPPLIER AGGREGATOR
 # ============================================================
-import io
+import asyncio
 import base64
+import csv
+import io
 import json
 import re
-from datetime import datetime, time, timedelta
-from typing import List, Optional, Dict, Tuple, Set, Any
 from collections import defaultdict
-from typing import Dict, Tuple, Optional, List, Set, cast
-import requests
-import xmltodict
-import chardet
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-
-import asyncio
-import httpx
-from sqlalchemy import func, case, cast, Numeric
-from core import (
-    HTTP_TIMEOUT,
-    MAX_PRODUCTS_PER_PROVIDER,
-)
-import csv
-from models import (
-    Supplier,
-    SupplierMapping,
-    HourlyProduct,
-    DailyProduct,
-    CityResponse,
-    ProductCompare,
-    ProductCanonical,
-    BarcodeAlias,
-)
-
-from repositories import (
-    SupplierRepo,
-    MappingRepo,
-    HourlyRepo,
-    DailyRepo,
-    SupplierCityRepo,
-    SupplierUnitRepo,
-    CityResponseRepo,
-    ProductCanonicalRepo,
-    BarcodeAliasRepo,
-    SupplierSrokRepo
-)
-
-
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Optional, Dict, Tuple, cast as tcast
+from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import cast
+from typing import cast as tcast
 from uuid import UUID
 
+import chardet
+import httpx
+import requests
+import xmltodict
+from sqlalchemy import Numeric, case, cast, func, text
 from sqlalchemy.orm import Session
 
-from stock_movement_model import StockMovement, StockMovementType
-from repositories import StockMovementRepo
-from repositories import HourlyRepo, BarcodeAliasRepo  # используем твои эталонные репо
-
-from utils import normalize_numeric
-from schemas import AggregatedItem, SupplierMappingCreate
-from utils import nested_get, normalize_barcode, clean_unit, normalize_name, normalize_srok
+from core import HTTP_TIMEOUT, MAX_PRODUCTS_PER_PROVIDER
 from database import SessionLocal
-
-
-from datetime import date
+from models import (
+    BarcodeAlias,
+    CityResponse,
+    Client,
+    DailyProduct,
+    HourlyProduct,
+    ProductCanonical,
+    ProductCompare,
+    Supplier,
+    SupplierMapping,
+)
+from repositories import BarcodeAliasRepo  # используем твои эталонные репо
+from repositories import (
+    CityResponseRepo,
+    DailyRepo,
+    HourlyRepo,
+    MappingRepo,
+    ProductCanonicalRepo,
+    StockMovementRepo,
+    SupplierCityRepo,
+    SupplierRepo,
+    SupplierSrokRepo,
+    SupplierUnitRepo,
+)
+from schemas import AggregatedItem, ClientResponse, SupplierMappingCreate
+from stock_movement_model import StockMovement, StockMovementType
+from utils import (
+    clean_unit,
+    nested_get,
+    normalize_barcode,
+    normalize_name,
+    normalize_numeric,
+    normalize_srok,
+)
 
 
 class SupplierSrokService:
@@ -119,6 +111,7 @@ def clean_xml(raw: str) -> str:
 
     return raw
 
+
 def sanitize_barcodes(raw) -> list[str]:
     """
     Оставляем ТОЛЬКО реальные баркоды:
@@ -139,15 +132,17 @@ def sanitize_barcodes(raw) -> list[str]:
     return cleaned
 
 
-
 # ============================================================
 # CITY SERVICE
 # ============================================================
 
+
 class CityService:
 
     @staticmethod
-    def extract_city_from_response(mapping: SupplierMapping, parsed_data: dict) -> Optional[str]:
+    def extract_city_from_response(
+        mapping: SupplierMapping, parsed_data: dict
+    ) -> Optional[str]:
         value = None
 
         # 1) city_path
@@ -167,12 +162,14 @@ class CityService:
         return str(value).strip() if value else None
 
     @staticmethod
-    def resolve_city(db: Session, provider_name: str, city_code: str, city_name: str) -> str:
+    def resolve_city(
+        db: Session, provider_name: str, city_code: str, city_name: str
+    ) -> str:
         city = (
             db.query(CityResponse)
             .filter(
                 CityResponse.provider_name == provider_name,
-                CityResponse.supplier_city_code == city_code
+                CityResponse.supplier_city_code == city_code,
             )
             .first()
         )
@@ -185,7 +182,7 @@ class CityService:
                 provider_name=provider_name,
                 supplier_city_code=city_code,
                 supplier_city_name=city_name,
-                normalized_city=city_name.lower()
+                normalized_city=city_name.lower(),
             )
             db.add(obj)
             db.commit()
@@ -200,7 +197,7 @@ class CityService:
                 db.query(CityResponse)
                 .filter(
                     CityResponse.provider_name == provider_name,
-                    CityResponse.supplier_city_code == city_code
+                    CityResponse.supplier_city_code == city_code,
                 )
                 .first()
             )
@@ -209,9 +206,22 @@ class CityService:
 
             raise
 
+
 # ============================================================
 # FETCH SERVICE (СИНХРОННЫЙ)
 # ============================================================
+
+
+import base64
+import io
+from typing import Optional
+
+import chardet
+import requests
+
+from core import HTTP_TIMEOUT
+from models import Supplier
+
 
 class FetchService:
     """
@@ -224,18 +234,41 @@ class FetchService:
       - returns RAW BYTES (for csv/excel parsing)
     """
 
+    # =========================================================
+    # 🚀 ENTRY POINT (ГЛАВНОЕ)
+    # =========================================================
+    @staticmethod
+    def fetch(supplier: Supplier) -> str | bytes:
+        """
+        AUTO transport resolver:
+        - if HTTP URL exists → use HTTP
+        - else → fallback to FTP/SFTP
+        """
+
+        # 🔥 HTTP PRIORITY
+        if supplier.json_url_get_price or supplier.xml_url_get_price:
+            url = supplier.json_url_get_price or supplier.xml_url_get_price
+
+            return FetchService.fetch_http_text(
+                url=url,
+                login=supplier.login,
+                password=supplier.password,
+            )
+
+        # 🔥 FTP FALLBACK
+        return FetchService.fetch_ftp_file_bytes(supplier)
+
+    # =========================================================
+    # 🌐 HTTP
+    # =========================================================
     @staticmethod
     def fetch_http_text(
         url: str,
-        login: str | None = None,
-        password: str | None = None,
+        login: Optional[str] = None,
+        password: Optional[str] = None,
         *,
         verify_ssl: bool = False,
     ) -> str:
-        """
-        HTTP fetch that returns TEXT with robust encoding detection.
-        Mirrors your previous logic but is explicit about HTTP.
-        """
         if not url:
             raise ValueError("HTTP URL is empty")
 
@@ -246,7 +279,7 @@ class FetchService:
 
         if login and password:
             raw = f"{login}:{password}".encode("utf-8")
-            headers["Authorization"] = "Basic " + base64.b64encode(raw).decode("ascii")
+            headers["Authorization"] = "Basic " + base64.b64encode(raw).decode()
 
         response = requests.get(
             url,
@@ -271,7 +304,7 @@ class FetchService:
         except Exception:
             pass
 
-        # cp1251
+        # cp1251 fallback
         try:
             txt = raw_bytes.decode("cp1251", errors="strict")
             if not looks_broken(txt):
@@ -279,17 +312,13 @@ class FetchService:
         except Exception:
             pass
 
-        # fallback
         return raw_bytes.decode("latin-1", errors="ignore")
 
+    # =========================================================
+    # 📦 FTP / SFTP
+    # =========================================================
     @staticmethod
     def fetch_ftp_file_bytes(supplier: Supplier) -> bytes:
-        """
-        Downloads a file from FTP/SFTP using Supplier fields:
-          ftp_host, ftp_port, ftp_login, ftp_password, ftp_path, ftp_type
-
-        Returns raw bytes (for csv/excel parsing).
-        """
         ftp_host = (supplier.ftp_host or "").strip()
         ftp_path = (supplier.ftp_path or "").strip()
         ftp_type = (supplier.ftp_type or "").strip().lower()
@@ -297,8 +326,10 @@ class FetchService:
 
         if not ftp_host:
             raise ValueError("Supplier.ftp_host is empty")
+
         if not ftp_path:
             raise ValueError("Supplier.ftp_path is empty")
+
         if ftp_type not in {"ftp", "sftp"}:
             raise ValueError("Supplier.ftp_type must be 'ftp' or 'sftp'")
 
@@ -311,15 +342,17 @@ class FetchService:
                 path=ftp_path,
             )
 
-        # sftp
         return FetchService._download_via_sftp(
             host=ftp_host,
-            port=ftp_port if ftp_port else 22,
+            port=ftp_port or 22,
             username=supplier.ftp_login,
             password=supplier.ftp_password,
             path=ftp_path,
         )
 
+    # =========================================================
+    # 📡 FTP
+    # =========================================================
     @staticmethod
     def _download_via_ftp(
         *,
@@ -333,34 +366,29 @@ class FetchService:
 
         bio = io.BytesIO()
 
-        # NOTE: timeout uses HTTP_TIMEOUT for consistency
         ftp = ftplib.FTP()
         ftp.connect(host=host, port=port, timeout=HTTP_TIMEOUT)
 
-        user = username or "anonymous"
-        pwd = password or ""
-        ftp.login(user=user, passwd=pwd)
+        ftp.login(user=username or "anonymous", passwd=password or "")
 
-        # Passive mode is typical for NAT environments
         try:
             ftp.set_pasv(True)
         except Exception:
             pass
 
-        # Retrieve the file
         try:
             ftp.retrbinary(f"RETR {path}", bio.write)
         finally:
             try:
                 ftp.quit()
             except Exception:
-                try:
-                    ftp.close()
-                except Exception:
-                    pass
+                ftp.close()
 
         return bio.getvalue()
 
+    # =========================================================
+    # 🔐 SFTP
+    # =========================================================
     @staticmethod
     def _download_via_sftp(
         *,
@@ -370,54 +398,36 @@ class FetchService:
         password: Optional[str],
         path: str,
     ) -> bytes:
-        """
-        Uses paramiko if available. If not installed, raises a clear error.
-        """
         try:
-            import paramiko  # type: ignore
+            import paramiko
         except Exception as e:
-            raise RuntimeError(
-                "SFTP requested but 'paramiko' is not installed. "
-                "Install paramiko to enable SFTP support."
-            ) from e
+            raise RuntimeError("SFTP requested but 'paramiko' is not installed") from e
 
         if not username or not password:
-            raise ValueError("SFTP requires ftp_login and ftp_password on Supplier")
+            raise ValueError("SFTP requires credentials")
 
-        transport = None
-        sftp = None
+        transport = paramiko.Transport((host, port))
+        transport.connect(username=username, password=password)
+
+        sftp = paramiko.SFTPClient.from_transport(transport)
 
         try:
-            transport = paramiko.Transport((host, port or 22))
-            transport.connect(username=username, password=password)
-
-            sftp = paramiko.SFTPClient.from_transport(transport)
-            if not sftp:
-                raise ValueError("Not found any transport")
-
             with sftp.open(path, "rb") as f:
                 return f.read()
-
         finally:
-            try:
-                if sftp is not None:
-                    sftp.close()
-            except Exception:
-                pass
-            try:
-                if transport is not None:
-                    transport.close()
-            except Exception:
-                pass
+            sftp.close()
+            transport.close()
+
+
 # ============================================================
 # FETCH SERVICE (АСИНХРОННЫЙ — ТОЛЬКО HTTP)
 # ============================================================
 
 
-
 # ============================================================
 # PARSE SERVICE — FINAL VERSION
 # ============================================================
+
 
 class ParseService:
     """
@@ -499,9 +509,7 @@ class ParseService:
         try:
             from openpyxl import load_workbook
         except Exception as e:
-            raise RuntimeError(
-                "Excel parsing requires openpyxl"
-            ) from e
+            raise RuntimeError("Excel parsing requires openpyxl") from e
 
         wb = load_workbook(io.BytesIO(raw), data_only=True)
         ws = wb.active
@@ -590,27 +598,25 @@ class ParseService:
             "sku_name": get_value(mapping.sku_name),
             "sku_price": get_value(mapping.sku_price),
             "sku_stock": get_value(mapping.sku_stock),
-
             "sku": get_value(mapping.sku),
             "sku_serial": get_value(mapping.sku_serial),
-
             "sku_barcodes": get_value(mapping.sku_barcodes),
             "sku_srok": get_value(mapping.sku_srok),
             "sku_step": get_value(mapping.sku_step),
             "sku_marker": get_value(mapping.sku_marker),
             "sku_pack": get_value(mapping.sku_pack),
             "sku_box": get_value(mapping.sku_box),
-
             "unit": get_value(mapping.unit),
             "min_order": get_value(mapping.min_order),
-
             "producer": get_value(mapping.producer),
             "producer_country": get_value(mapping.producer_country),
         }
 
+
 # ============================================================
 # SYNC SERVICE
 # ============================================================
+
 
 class SyncService:
 
@@ -739,7 +745,8 @@ class SyncService:
                         normalized = ParseService.normalize_item(item, mapping)
 
                         barcodes = [
-                            b for b in normalize_barcode(normalized.get("sku_barcodes"))
+                            b
+                            for b in normalize_barcode(normalized.get("sku_barcodes"))
                             if b.isdigit() and 6 <= len(b) <= 14
                         ]
                         if not barcodes:
@@ -761,6 +768,7 @@ class SyncService:
                                 provider_name=supplier.provider_name,
                                 provider_bin=supplier.provider_bin,
                                 city=city.normalized_city,
+                                client_uid=supplier.client_uid,
                                 **normalized,
                             )
                         )
@@ -770,19 +778,23 @@ class SyncService:
 
                     total_products += len(objects)
 
-                    results.append({
-                        "city": city.normalized_city,
-                        "processed": len(objects),
-                        "status": "success",
-                    })
+                    results.append(
+                        {
+                            "city": city.normalized_city,
+                            "processed": len(objects),
+                            "status": "success",
+                        }
+                    )
 
                 except Exception as e:
                     db.rollback()
-                    results.append({
-                        "city": city.normalized_city,
-                        "status": "error",
-                        "message": str(e),
-                    })
+                    results.append(
+                        {
+                            "city": city.normalized_city,
+                            "status": "error",
+                            "message": str(e),
+                        }
+                    )
 
         # -----------------------------------------------------
         # SINGLE CITY
@@ -797,13 +809,19 @@ class SyncService:
                     mapping.items_path,
                 )
 
+                print("\n===== DEBUG FETCH =====")
+                print("PROVIDER:", supplier.provider_name)
+                print("URL:", supplier.json_url_get_price or supplier.xml_url_get_price)
+                print("RAW (first 1000):", str(raw)[:1000])
+
                 objects: List[HourlyProduct] = []
 
                 for item in items[:MAX_PRODUCTS_PER_PROVIDER]:
                     normalized = ParseService.normalize_item(item, mapping)
 
                     barcodes = [
-                        b for b in normalize_barcode(normalized.get("sku_barcodes"))
+                        b
+                        for b in normalize_barcode(normalized.get("sku_barcodes"))
                         if b.isdigit()
                     ]
                     if not barcodes:
@@ -825,6 +843,7 @@ class SyncService:
                             provider_name=supplier.provider_name,
                             provider_bin=supplier.provider_bin,
                             city=None,
+                            client_uid=supplier.client_uid,
                             **normalized,
                         )
                     )
@@ -834,11 +853,13 @@ class SyncService:
 
                 total_products = len(objects)
 
-                results.append({
-                    "city": None,
-                    "processed": total_products,
-                    "status": "success",
-                })
+                results.append(
+                    {
+                        "city": None,
+                        "processed": total_products,
+                        "status": "success",
+                    }
+                )
 
             except Exception as e:
                 db.rollback()
@@ -870,6 +891,7 @@ class SyncService:
                     provider_id=h.provider_id,
                     provider_name=h.provider_name,
                     provider_bin=h.provider_bin,
+                    client_uid=h.client_uid,
                     city=h.city,
                     producer=h.producer,
                     producer_country=h.producer_country,
@@ -930,24 +952,45 @@ class SyncService:
         HourlyRepo.clear_table(db)
         return True
 
+
 def to_str(val):
     return str(val) if val is not None else None
+
 
 # ============================================================
 # PRODUCT SERVICE
 # ============================================================
 
+
 class ProductService:
 
     @staticmethod
-    def get_by_barcode(db: Session, barcode: str, city: Optional[str] = None, provider_name: Optional[str] = None) -> List[AggregatedItem]:
+    def get_by_barcode(
+        db: Session,
+        barcode: str,
+        client_uid: UUID | None,
+        city: Optional[str] = None,
+        provider_name: Optional[str] = None,
+    ) -> List[AggregatedItem]:
 
         # 1) HOURLY
-        items = HourlyRepo.get_latest_by_barcode(db, barcode, city=city, provider_name=provider_name)
+        items = HourlyRepo.get_latest_by_barcode(
+            db,
+            barcode,
+            city=city,
+            provider_name=provider_name,
+            client_uid=client_uid,
+        )
 
         # 2) DAILY fallback
         if not items:
-            items = DailyRepo.get_latest_by_barcode(db, barcode, city=city, provider_name=provider_name)
+            items = DailyRepo.get_latest_by_barcode(
+                db,
+                barcode,
+                city=city,
+                provider_name=provider_name,
+                client_uid=client_uid,
+            )
 
         result: List[AggregatedItem] = []
 
@@ -981,7 +1024,7 @@ class ProductService:
                     sku_serial=item.sku_serial,
                     sku_srok=item.sku_srok,
                     sku_marker=item.sku_marker,
-                    last_update=item.created_at
+                    last_update=item.created_at,
                 )
             )
 
@@ -991,6 +1034,7 @@ class ProductService:
 # ============================================================
 # MAPPING CREATE + AUTO SYNC
 # ============================================================
+
 
 class SupplierMappingService:
 
@@ -1008,7 +1052,7 @@ class SupplierMappingService:
             return {
                 "status": "warning",
                 "message": "Mapping created, but supplier not found",
-                "mapping_id": str(mapping.id)
+                "mapping_id": str(mapping.id),
             }
 
         result = SyncService.sync_single_supplier(db, supplier)
@@ -1023,6 +1067,7 @@ class SupplierMappingService:
 # ============================================================
 # UNIVERSAL ANALYTICS SERVICE — DAILY / WEEKLY / MONTHLY
 # ============================================================
+
 
 class AnalyticsService:
 
@@ -1060,7 +1105,7 @@ class AnalyticsService:
         end_date=None,
         provider_name: Optional[str] = None,
         city: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
     ) -> dict:
         """
         🔥 HOT PRODUCTS (корректная логика)
@@ -1107,20 +1152,19 @@ class AnalyticsService:
                 if base > 0:
                     percent = round((sold / base) * 100, 2)
 
-            items.append({
-                "provider_name": r["provider_name"],
-                "city": r["city"],
-
-                "canonical_id": r["canonical_id"],
-                "sku_uid": r["sku_uid"],
-                "sku_name": r["sku_name"],
-
-                "sold": round(sold, 3),
-                "restocked": round(restocked, 3),
-                "net_delta": round(net, 3),
-
-                "percent": percent,
-            })
+            items.append(
+                {
+                    "provider_name": r["provider_name"],
+                    "city": r["city"],
+                    "canonical_id": r["canonical_id"],
+                    "sku_uid": r["sku_uid"],
+                    "sku_name": r["sku_name"],
+                    "sold": round(sold, 3),
+                    "restocked": round(restocked, 3),
+                    "net_delta": round(net, 3),
+                    "percent": percent,
+                }
+            )
 
         # сортируем по реальному спросу
         items.sort(
@@ -1140,8 +1184,10 @@ class AnalyticsService:
 # ============================================================
 # CANONICAL RESOLVE SERVICE
 # ============================================================
-from uuid import UUID 
+from uuid import UUID
+
 from sqlalchemy import select
+
 
 def _row_get(row, key):
     try:
@@ -1151,7 +1197,11 @@ def _row_get(row, key):
             return row._mapping.get(key)
         except Exception:
             return None
+
+
 from repositories import PostProcessStateRepo
+
+
 class CanonicalResolveService:
     """
     Строит и обновляет product_canonical и barcode_aliases
@@ -1160,9 +1210,7 @@ class CanonicalResolveService:
 
     @staticmethod
     def rebuild_from_hourly(db: Session) -> None | datetime:
-        state = PostProcessStateRepo.get(
-            db
-        )
+        state = PostProcessStateRepo.get(db)
 
         items = HourlyRepo.get_newer_than(
             db,
@@ -1175,11 +1223,9 @@ class CanonicalResolveService:
         # ---- дальше ТВОЯ СУЩЕСТВУЮЩАЯ ЛОГИКА ----
         # НИЧЕГО в алгоритме не меняем
 
-        
         # после обработки
         last_at = items[-1].created_at
 
-       
         # =========================
         # 2. preload maps
         # =========================
@@ -1267,9 +1313,7 @@ class CanonicalResolveService:
             # =========================
             for b in barcodes:
                 if b not in alias_map:
-                    new_aliases.append(
-                        (b, item.provider_name, canonical_id)
-                    )
+                    new_aliases.append((b, item.provider_name, canonical_id))
                     alias_map[b] = canonical_id
 
         # =========================
@@ -1283,13 +1327,10 @@ class CanonicalResolveService:
                 canonical_id=canonical_id,
             )
 
-        
         HourlyRepo.attach_canonical_ids(db)
-     
-
 
         # коммит здесь безопасен и финальный
-        
+
         return last_at
 
     @staticmethod
@@ -1307,6 +1348,7 @@ class CanonicalResolveService:
 
         # 2️⃣ запускаем обычный rebuild
         CanonicalResolveService.rebuild_from_hourly(db)
+
 
 # ============================================================
 # PRODUCT COMPARE SERVICE
@@ -1337,43 +1379,58 @@ class ProductCompareService:
                 ProductCanonical.id.label("canonical_id"),
                 func.min(BarcodeAlias.barcode).label("barcode"),
                 func.min(HourlyProduct.sku_name).label("sku_name"),
-
                 func.max(
                     case(
-                        (HourlyProduct.provider_name == "atamiras",
-                         cast(func.replace(HourlyProduct.sku_price, ",", "."), Numeric)),
+                        (
+                            HourlyProduct.provider_name == "atamiras",
+                            cast(
+                                func.replace(HourlyProduct.sku_price, ",", "."), Numeric
+                            ),
+                        ),
                         else_=None,
                     )
                 ).label("price_atamiras"),
-
                 func.max(
                     case(
-                        (HourlyProduct.provider_name == "medservice",
-                         cast(func.replace(HourlyProduct.sku_price, ",", "."), Numeric)),
+                        (
+                            HourlyProduct.provider_name == "medservice",
+                            cast(
+                                func.replace(HourlyProduct.sku_price, ",", "."), Numeric
+                            ),
+                        ),
                         else_=None,
                     )
                 ).label("price_medservice"),
-
                 func.max(
                     case(
-                        (HourlyProduct.provider_name == "stopharm",
-                         cast(func.replace(HourlyProduct.sku_price, ",", "."), Numeric)),
+                        (
+                            HourlyProduct.provider_name == "stopharm",
+                            cast(
+                                func.replace(HourlyProduct.sku_price, ",", "."), Numeric
+                            ),
+                        ),
                         else_=None,
                     )
                 ).label("price_stopharm"),
-
                 func.max(
                     case(
-                        (HourlyProduct.provider_name == "amanat",
-                         cast(func.replace(HourlyProduct.sku_price, ",", "."), Numeric)),
+                        (
+                            HourlyProduct.provider_name == "amanat",
+                            cast(
+                                func.replace(HourlyProduct.sku_price, ",", "."), Numeric
+                            ),
+                        ),
                         else_=None,
                     )
                 ).label("price_amanat"),
-
                 func.max(
                     case(
-                        (HourlyProduct.provider_name == "rauza",
-                         cast(func.replace(HourlyProduct.sku_price, ",", "."), Numeric)),
+                        (
+                            HourlyProduct.provider_name == "rauza",
+                            cast(
+                                func.replace(HourlyProduct.sku_price, ",", "."), Numeric
+                            ),
+                        ),
                         else_=None,
                     )
                 ).label("price_rauza"),
@@ -1398,7 +1455,9 @@ class ProductCompareService:
                 barcode=r.barcode,
                 sku_name=r.sku_name,
                 price_atamiras=str(r.price_atamiras) if r.price_atamiras else None,
-                price_medservice=str(r.price_medservice) if r.price_medservice else None,
+                price_medservice=(
+                    str(r.price_medservice) if r.price_medservice else None
+                ),
                 price_stopharm=str(r.price_stopharm) if r.price_stopharm else None,
                 price_amanat=str(r.price_amanat) if r.price_amanat else None,
                 price_rauza=str(r.price_rauza) if r.price_rauza else None,
@@ -1410,6 +1469,7 @@ class ProductCompareService:
                     setattr(obj, k, v)
             else:
                 db.add(ProductCompare(**payload))
+
     @staticmethod
     def rebuild_full(db: Session) -> None:
         """
@@ -1420,7 +1480,8 @@ class ProductCompareService:
         db.commit()
 
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO product_compare (
                     canonical_id,
                     barcode,
@@ -1461,10 +1522,12 @@ class ProductCompareService:
                 JOIN barcode_aliases ba ON ba.barcode = b.code
                 JOIN product_canonical pc ON pc.id = ba.canonical_id
                 GROUP BY pc.id
-            """)
+            """
+            )
         )
 
         db.commit()
+
 
 class PostProcessService:
     """
@@ -1653,23 +1716,25 @@ class StockMovementService:
                     prev_cache[key] = stock_after
                     continue
 
-                rows.append({
-                    "provider_name": h.provider_name,
-                    "city": h.city,
-                    "canonical_id": canonical_id,
-                    "sku_uid": h.sku_uid,
-                    "sku_name": h.sku_name,
-                    "stock_before": stock_before,
-                    "stock_after": stock_after,
-                    "delta": delta,
-                    "movement_type": (
-                        StockMovementType.sale
-                        if delta < 0
-                        else StockMovementType.restock
-                    ),
-                    "source": "hourly",
-                    "snapshot_at": h.created_at,
-                })
+                rows.append(
+                    {
+                        "provider_name": h.provider_name,
+                        "city": h.city,
+                        "canonical_id": canonical_id,
+                        "sku_uid": h.sku_uid,
+                        "sku_name": h.sku_name,
+                        "stock_before": stock_before,
+                        "stock_after": stock_after,
+                        "delta": delta,
+                        "movement_type": (
+                            StockMovementType.sale
+                            if delta < 0
+                            else StockMovementType.restock
+                        ),
+                        "source": "hourly",
+                        "snapshot_at": h.created_at,
+                    }
+                )
 
                 prev_cache[key] = stock_after
 
@@ -1691,7 +1756,7 @@ class StockMovementService:
             )
 
         return total_created
-    
+
     @staticmethod
     def build_hourly_movements_all(
         db: Session,
@@ -1719,3 +1784,49 @@ class StockMovementService:
 
         db.commit()
         return total_created
+
+
+class ClientService:
+    @staticmethod
+    def create_client(client: ClientResponse, db: Session):
+        clients = Client(name=client.name, bin=client.bin)
+
+        db.add(clients)
+        db.commit()
+        db.refresh(clients)
+
+        return clients
+
+    @staticmethod
+    def get_client(client_uid: UUID, db: Session):
+        client = db.query(Client).filter(Client.uid == client_uid).first()
+
+        return client
+
+    @staticmethod
+    def get_clients(db: Session):
+        return db.query(Client).all()
+
+    @staticmethod
+    def update_client(client_uid: UUID, name: str | None, bin: int | None, db: Session):
+
+        client = db.query(Client).filter(Client.uid == client_uid).first()
+        if not client:
+            return
+
+        if name:
+            client.name = name
+        if bin:
+            client.bin = bin
+
+        db.commit()
+
+        db.refresh(client)
+        return client
+
+    @staticmethod
+    def delete_client(client_uid: UUID, db: Session):
+        client = db.query(Client).filter(Client.uid == client_uid).first()
+        db.delete(client)
+        db.commit()
+        return True

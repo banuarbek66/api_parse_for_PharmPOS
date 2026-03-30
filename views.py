@@ -1,20 +1,22 @@
 from sqladmin import ModelView
 
 from models import (
+    CityResponse,
+    Client,
+    DailyProduct,
+    HourlyProduct,
+    ProductCompare,
     Supplier,
     SupplierMapping,
-    CityResponse,
+    SupplierSrokResponse,
     SupplierUnit,
-    HourlyProduct,
-    DailyProduct,
-    ProductCompare,
-    SupplierSrokResponse
 )
 from stock_movement_model import StockMovement
 
 # ============================================================
 # SUPPLIERS
 # ============================================================
+
 
 class SupplierAdmin(ModelView, model=Supplier):
     column_list = [
@@ -42,6 +44,7 @@ class SupplierAdmin(ModelView, model=Supplier):
 # SUPPLIER MAPPING
 # ============================================================
 
+
 class SupplierMappingAdmin(ModelView, model=SupplierMapping):
     column_list = [
         SupplierMapping.provider_name,
@@ -67,7 +70,6 @@ class SupplierMappingAdmin(ModelView, model=SupplierMapping):
         SupplierMapping.city_in_params,
         SupplierMapping.city_in_body,
         SupplierMapping.city_in_headers,
-
         SupplierMapping.sku_uid,
         SupplierMapping.sku_name,
         SupplierMapping.sku_price,
@@ -80,6 +82,7 @@ class SupplierMappingAdmin(ModelView, model=SupplierMapping):
 # ============================================================
 # CITY RESPONSE
 # ============================================================
+
 
 class CityResponseAdmin(ModelView, model=CityResponse):
     column_list = [
@@ -107,6 +110,7 @@ class CityResponseAdmin(ModelView, model=CityResponse):
 # ============================================================
 # ✅ SUPPLIER UNIT (КЛЮЧЕВОЙ КЛАССИФИКАТОР)
 # ============================================================
+
 
 class SupplierUnitAdmin(ModelView, model=SupplierUnit):
     column_list = [
@@ -140,6 +144,7 @@ class SupplierUnitAdmin(ModelView, model=SupplierUnit):
 # ✅ HOURLY PRODUCTS
 # ============================================================
 
+
 class HourlyProductAdmin(ModelView, model=HourlyProduct):
     can_create = False
     can_edit = False
@@ -155,8 +160,6 @@ class HourlyProductAdmin(ModelView, model=HourlyProduct):
         HourlyProduct.unit,
         HourlyProduct.created_at,
     ]
-
-    
 
     column_labels = {
         HourlyProduct.id: "ID",
@@ -181,6 +184,7 @@ class HourlyProductAdmin(ModelView, model=HourlyProduct):
 # ============================================================
 # ✅ DAILY PRODUCTS
 # ============================================================
+
 
 class DailyProductAdmin(ModelView, model=DailyProduct):
     can_create = False
@@ -208,18 +212,10 @@ class DailyProductAdmin(ModelView, model=DailyProduct):
         DailyProduct.unit: "Ед.изм (код)",
         DailyProduct.snapshot_date: "Дата снимка",
     }
-    
-   
 
-
-    column_searchable_list = [
-        "sku_name",
-        "sku_barcodes",
-        "snapshot_date"
-    ]
+    column_searchable_list = ["sku_name", "sku_barcodes", "snapshot_date"]
 
     column_sortable_list = ["id", "created_at"]
-
 
 
 class ProductCompareAdmin(ModelView, model=ProductCompare):
@@ -235,7 +231,6 @@ class ProductCompareAdmin(ModelView, model=ProductCompare):
         ProductCompare.price_stopharm,
         ProductCompare.price_amanat,
         ProductCompare.price_rauza,
-        
     ]
 
     column_searchable_list = [
@@ -255,24 +250,26 @@ class ProductCompareAdmin(ModelView, model=ProductCompare):
     can_create = False
     can_edit = False
     can_delete = False
+
+
 class StockMovementAdmin(ModelView, model=StockMovement):
-    name= "Stock Movement"
+    name = "Stock Movement"
 
     column_exclude_list = [StockMovement.canonical_id]
     can_create = False
-    can_edit=False
-    can_delete=False
+    can_edit = False
+    can_delete = False
+
 
 class SupllierSrokAdmin(ModelView, model=SupplierSrokResponse):
-    name='Suplier Srok'
+    name = "Suplier Srok"
     column_list = [
         SupplierSrokResponse.provider_name,
         SupplierSrokResponse.provider_srok_raw,
         SupplierSrokResponse.normalized_srok,
     ]
-    form_columns=[
+    form_columns = [
         SupplierSrokResponse.provider_name,
         SupplierSrokResponse.provider_srok_raw,
         SupplierSrokResponse.normalized_srok,
     ]
-
