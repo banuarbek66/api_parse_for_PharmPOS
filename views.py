@@ -10,6 +10,7 @@ from models import (
     SupplierMapping,
     SupplierSrokResponse,
     SupplierUnit,
+    Client,
 )
 from stock_movement_model import StockMovement
 
@@ -273,3 +274,11 @@ class SupllierSrokAdmin(ModelView, model=SupplierSrokResponse):
         SupplierSrokResponse.provider_srok_raw,
         SupplierSrokResponse.normalized_srok,
     ]
+
+
+class ClietnAdmin(ModelView, model=Client):
+    name = "Clients"
+
+    column_list = [Client.uid, Client.name, Client.bin]
+
+    form_columns = [Client.uid, Client.name, Client.bin]
