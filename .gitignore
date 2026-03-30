@@ -36,7 +36,7 @@ Desktop.ini
 # Linux FS garbage
 *.swp
 *.swo
-
+alembic/versions
 # ==========================================
 # LOGS / TEMP
 # ==========================================

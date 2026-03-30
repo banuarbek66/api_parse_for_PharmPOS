@@ -4,13 +4,9 @@ from sqlalchemy.orm import Session
 from deps import get_db
 from models import SupplierSrokResponse
 from repositories import SupplierSrokRepo
+from schemas import SupplierSrokBase as SupplierSrokResponseSchema
+from schemas import SupplierSrokCreate, SupplierSrokUpdate
 from utils import normalize_srok
-
-from schemas import (
-    SupplierSrokCreate,
-    SupplierSrokUpdate,
-    SupplierSrokBase as SupplierSrokResponseSchema,
-)
 
 router = APIRouter(prefix="/supplier-srok", tags=["Supplier Srok"])
 

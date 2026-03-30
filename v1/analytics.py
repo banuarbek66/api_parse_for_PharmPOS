@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from deps import get_db
 from services import AnalyticsService
@@ -14,31 +15,22 @@ def get_hot_products(
     period: str = Query(
         "today",
         description="Период анализа: today | week | month | custom",
-        regex="^(today|week|month|custom)$"
+        regex="^(today|week|month|custom)$",
     ),
     start_date: Optional[str] = Query(
         None,
-        description="Дата начала периода (YYYY-MM-DD). Используется только если period=custom"
+        description="Дата начала периода (YYYY-MM-DD). Используется только если period=custom",
     ),
     end_date: Optional[str] = Query(
         None,
-        description="Дата конца периода (YYYY-MM-DD). Используется только если period=custom"
+        description="Дата конца периода (YYYY-MM-DD). Используется только если period=custom",
     ),
     provider_name: Optional[str] = Query(
-        None,
-        description="Название поставщика (опционально)"
+        None, description="Название поставщика (опционально)"
     ),
-    city: Optional[str] = Query(
-        None,
-        description="Город (опционально)"
-    ),
-    limit: int = Query(
-        10,
-        ge=1,
-        le=100,
-        description="Количество товаров в топе"
-    ),
-    db: Session = Depends(get_db)
+    city: Optional[str] = Query(None, description="Город (опционально)"),
+    limit: int = Query(10, ge=1, le=100, description="Количество товаров в топе"),
+    db: Session = Depends(get_db),
 ):
     """
     Получить список «горячих товаров» — быстрых продаж
@@ -58,7 +50,7 @@ def get_hot_products(
         if not start_date or not end_date:
             return {
                 "status": "error",
-                "message": "Для period=custom требуется start_date и end_date"
+                "message": "Для period=custom требуется start_date и end_date",
             }
 
         try:
@@ -67,7 +59,7 @@ def get_hot_products(
         except ValueError:
             return {
                 "status": "error",
-                "message": "Неверный формат дат. Формат должен быть YYYY-MM-DD."
+                "message": "Неверный формат дат. Формат должен быть YYYY-MM-DD.",
             }
 
     result = AnalyticsService.get_hot_products_period(

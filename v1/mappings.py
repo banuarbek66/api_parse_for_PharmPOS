@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from deps import get_db
-from repositories import MappingRepo
 from models import SupplierMapping
+from repositories import MappingRepo
 from schemas import SupplierMappingCreate, SupplierMappingRead
 from services import SupplierMappingService
 
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/mappings", tags=["Mappings"])
 # GET ALL MAPPINGS
 # =====================================================
 
+
 @router.get("/", response_model=list[SupplierMappingRead])
 def get_mappings(db: Session = Depends(get_db)):
     return MappingRepo.get_all(db)
@@ -24,6 +25,7 @@ def get_mappings(db: Session = Depends(get_db)):
 # =====================================================
 # CREATE MAPPING + AUTO SYNC
 # =====================================================
+
 
 @router.post("/", response_model=dict)
 def create_mapping(data: SupplierMappingCreate, db: Session = Depends(get_db)):
@@ -40,6 +42,7 @@ def create_mapping(data: SupplierMappingCreate, db: Session = Depends(get_db)):
 # GET MAPPING BY PROVIDER
 # =====================================================
 
+
 @router.get("/{provider_name}", response_model=SupplierMappingRead)
 def get_mapping(provider_name: str, db: Session = Depends(get_db)):
 
@@ -47,8 +50,7 @@ def get_mapping(provider_name: str, db: Session = Depends(get_db)):
 
     if not mapping:
         raise HTTPException(
-            status_code=404,
-            detail=f"Mapping for provider '{provider_name}' not found"
+            status_code=404, detail=f"Mapping for provider '{provider_name}' not found"
         )
 
     return mapping
@@ -58,11 +60,10 @@ def get_mapping(provider_name: str, db: Session = Depends(get_db)):
 # UPDATE MAPPING
 # =====================================================
 
+
 @router.put("/{provider_name}", response_model=SupplierMappingRead)
 def update_mapping(
-    provider_name: str,
-    data: SupplierMappingCreate,
-    db: Session = Depends(get_db)
+    provider_name: str, data: SupplierMappingCreate, db: Session = Depends(get_db)
 ):
     """
     Обновление маппинга по provider_name
@@ -72,8 +73,7 @@ def update_mapping(
 
     if not mapping:
         raise HTTPException(
-            status_code=404,
-            detail=f"Mapping for provider '{provider_name}' not found"
+            status_code=404, detail=f"Mapping for provider '{provider_name}' not found"
         )
 
     for key, value in data.dict().items():
@@ -89,6 +89,7 @@ def update_mapping(
 # DELETE MAPPING
 # =====================================================
 
+
 @router.delete("/{provider_name}")
 def delete_mapping(provider_name: str, db: Session = Depends(get_db)):
 
@@ -96,8 +97,7 @@ def delete_mapping(provider_name: str, db: Session = Depends(get_db)):
 
     if not mapping:
         raise HTTPException(
-            status_code=404,
-            detail=f"Mapping for provider '{provider_name}' not found"
+            status_code=404, detail=f"Mapping for provider '{provider_name}' not found"
         )
 
     MappingRepo.delete(db, mapping)

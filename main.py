@@ -4,6 +4,7 @@
 # ============================================================
 import os
 import sys
+
 from tasks.scheduler import start_scheduler
 
 # ✅ Жёсткая принудительная установка UTF-8 для Python
@@ -15,10 +16,11 @@ os.environ["LC_ALL"] = "C.UTF-8"
 if sys.platform == "win32":
     os.system("chcp 65001 > nul")
 
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from database import engine 
 
+from fastapi import FastAPI
+
+from database import engine
 from tasks.scheduler import start_scheduler
 from v1.router import router as v1_router
 
@@ -30,7 +32,6 @@ async def lifespan(app: FastAPI):
     """
 
     # 1. Инициализация базы данных (создание таблиц)
-   
 
     # 2. Запуск scheduler (cron-задачи)
     print("⏰ Starting scheduler...")
@@ -47,8 +48,10 @@ app = FastAPI(
     title="PharmPOS Supplier Aggregator",
     version="1.0.0",
     description="API for parsing, normalizing & syncing suppliers data",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
+
+
 @app.on_event("startup")
 def on_startup():
     start_scheduler()
@@ -64,26 +67,23 @@ def root():
     return {
         "message": "PharmPOS Supplier Aggregator is running 🚀",
         "docs": "/docs",
-        "version": "1.0.0"
+        "version": "1.0.0",
     }
 
 
 from sqladmin import Admin
 
-
 from views import (
+    CityResponseAdmin,
+    DailyProductAdmin,
+    HourlyProductAdmin,
+    ProductCompareAdmin,
+    StockMovementAdmin,
+    SupllierSrokAdmin,
     SupplierAdmin,
     SupplierMappingAdmin,
-    CityResponseAdmin,
     SupplierUnitAdmin,
-    HourlyProductAdmin,
-    DailyProductAdmin,
-    ProductCompareAdmin,
-    SupllierSrokAdmin,
-    StockMovementAdmin
 )
-
-
 
 # ✅ ADMIN
 admin = Admin(app, engine)

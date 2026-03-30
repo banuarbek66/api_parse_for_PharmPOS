@@ -3,20 +3,21 @@
 # SCHEDULER ДЛЯ PHARM-POS AGGREGATOR
 # ============================================================
 
+import atexit
 import os
 import time
-import atexit
 from contextlib import contextmanager
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from database import SessionLocal
-from services import SyncService, PostProcessService, StockMovementService
 from repositories import PostProcessStateRepo
+from services import PostProcessService, StockMovementService, SyncService
+
 
 def _get_max_hourly_created_at(db: Session):
     return db.execute(text("SELECT max(created_at) FROM hourly_products")).scalar()
@@ -50,6 +51,7 @@ def _pid_log(msg: str) -> None:
     # systemd/journalctl и так соберёт stdout, но добавим PID и время
     print(f"[{datetime.utcnow().isoformat()}Z][PID:{os.getpid()}] {msg}", flush=True)
 
+
 def run_stock_movements_only() -> None:
     """
     Отдельный запуск stock movements (если понадобится)
@@ -58,9 +60,7 @@ def run_stock_movements_only() -> None:
 
     try:
         created = StockMovementService.build_hourly_movements_all(db)
-        print(
-            f"[STOCK_MOVEMENTS] created={created} at {datetime.utcnow().isoformat()}"
-        )
+        print(f"[STOCK_MOVEMENTS] created={created} at {datetime.utcnow().isoformat()}")
 
     except Exception as e:
         print(f"[STOCK_MOVEMENTS][ERROR] {e}")
@@ -68,6 +68,8 @@ def run_stock_movements_only() -> None:
 
     finally:
         db.close()
+
+
 def _try_advisory_lock(db: Session, lock_key: int) -> bool:
     """
     Защита от гонок:
@@ -75,11 +77,15 @@ def _try_advisory_lock(db: Session, lock_key: int) -> bool:
       то задачу выполнит только один.
     """
     # pg_try_advisory_lock возвращает boolean
-    return bool(db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key}).scalar())
+    return bool(
+        db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": lock_key}).scalar()
+    )
 
 
 def _advisory_unlock(db: Session, lock_key: int) -> None:
     db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": lock_key})
+
+
 def nightly_rebuild_job():
     _pid_log("🌙 [TASK] Nightly rebuild started")
 
@@ -103,6 +109,7 @@ def nightly_rebuild_job():
 # ------------------------------------------------------------
 # ЗАДАЧИ
 # ------------------------------------------------------------
+
 
 def hourly_sync_job():
     """
@@ -154,9 +161,6 @@ def postprocess_job():
             if state.last_hourly_at and max_hourly <= state.last_hourly_at:
                 _pid_log("⏭️ [TASK] Postprocess skipped (no new hourly data)")
                 return
-
-            
-            
 
             started = time.time()
             result = PostProcessService.rebuild_all(db)
@@ -256,6 +260,7 @@ def first_sync_of_day():
 # ЗАПУСК ПЛАНИРОВЩИКА
 # ------------------------------------------------------------
 
+
 def start_scheduler():
     """
     Важно для systemd/uvicorn:
@@ -273,7 +278,7 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time= 15 * 60,  # 15 минут
+        misfire_grace_time=15 * 60,  # 15 минут
     )
 
     scheduler.add_job(
@@ -283,7 +288,7 @@ def start_scheduler():
         max_instances=1,
         replace_existing=True,
         coalesce=True,
-        misfire_grace_time= 20 * 60,
+        misfire_grace_time=20 * 60,
     )
 
     # ⚙️ Каждый час +10 минут → POSTPROCESS
@@ -294,7 +299,7 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time= 20 * 60,  # 30 минут
+        misfire_grace_time=20 * 60,  # 30 минут
     )
 
     # 🕚 23:50 → DAILY SNAPSHOT
@@ -308,13 +313,13 @@ def start_scheduler():
         misfire_grace_time=60 * 60,  # 1 час
     )
     scheduler.add_job(
-    nightly_rebuild_job,
-    CronTrigger(hour=3, minute=0),
-    id="nightly_rebuild",
-    replace_existing=True,
-    max_instances=1,
-    coalesce=True,
-)
+        nightly_rebuild_job,
+        CronTrigger(hour=3, minute=0),
+        id="nightly_rebuild",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     # 🕛 00:00 → CLEANUP HOURLY
     scheduler.add_job(

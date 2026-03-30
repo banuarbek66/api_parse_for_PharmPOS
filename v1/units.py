@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from deps import get_db
 
 import core
-import schemas
 import models
+import schemas
+from deps import get_db
+
 router = APIRouter(prefix="/v1/units", tags=["Units"])
+
 
 @router.post("/", response_model=schemas.SupplierUnitRead)
 def create_unit(data: schemas.SupplierUnitCreate, db: Session = Depends(get_db)):
@@ -13,10 +15,7 @@ def create_unit(data: schemas.SupplierUnitCreate, db: Session = Depends(get_db))
 
 
 @router.get("/", response_model=list[schemas.SupplierUnitRead])
-def list_units(
-    provider_name: str | None = None,
-    db: Session = Depends(get_db)
-):
+def list_units(provider_name: str | None = None, db: Session = Depends(get_db)):
     q = db.query(models.SupplierUnit)
     if provider_name:
         q = q.filter(models.SupplierUnit.provider_name == provider_name)

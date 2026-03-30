@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from deps import get_db
-from repositories import SupplierRepo
 from models import Supplier
+from repositories import SupplierRepo
 from schemas import SupplierCreate, SupplierRead
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
@@ -30,8 +30,7 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
     exists = SupplierRepo.get_by_name(db, data.provider_name)
     if exists:
         raise HTTPException(
-            status_code=400,
-            detail=f"Supplier '{data.provider_name}' already exists"
+            status_code=400, detail=f"Supplier '{data.provider_name}' already exists"
         )
 
     supplier = Supplier(**data.model_dump())

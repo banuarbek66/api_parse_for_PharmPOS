@@ -3,14 +3,14 @@
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ PHARM-POS AGGREGATOR
 # ============================================================
 
-from typing import Any, List, Optional, Dict
-from datetime import datetime, date
 import re
-
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 # ============================================================
 # SROK NORMALIZATION
 # ============================================================
+
 
 def normalize_srok(raw: Optional[str], pattern: Optional[str] = None) -> str:
     """
@@ -101,6 +101,7 @@ def normalize_srok(raw: Optional[str], pattern: Optional[str] = None) -> str:
 # SAFE GET
 # ============================================================
 
+
 def safe_get(data: Any, key: Optional[str], default=None):
     if not key or not isinstance(data, dict):
         return default
@@ -110,6 +111,7 @@ def safe_get(data: Any, key: Optional[str], default=None):
 # ============================================================
 # NESTED GET (JSON / XML)
 # ============================================================
+
 
 def nested_get(data: Any, path: Optional[str], default=None):
     """
@@ -144,6 +146,7 @@ def nested_get(data: Any, path: Optional[str], default=None):
 # FORCE LIST
 # ============================================================
 
+
 def to_list(data: Any) -> List[Any]:
     if data is None:
         return []
@@ -155,6 +158,7 @@ def to_list(data: Any) -> List[Any]:
 # ============================================================
 # BARCODE NORMALIZATION
 # ============================================================
+
 
 def normalize_barcode(value: Any) -> List[str]:
     """
@@ -182,6 +186,7 @@ def normalize_barcode(value: Any) -> List[str]:
 # NUMERIC NORMALIZATION
 # ============================================================
 
+
 def normalize_numeric(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -194,6 +199,7 @@ def normalize_numeric(value: Any) -> Optional[float]:
 # ============================================================
 # CITY EXTRACTOR
 # ============================================================
+
 
 def extract_city_from_anywhere(
     *,
@@ -232,6 +238,7 @@ def extract_city_from_anywhere(
 # CITY NORMALIZATION
 # ============================================================
 
+
 def normalize_city(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -242,6 +249,7 @@ def normalize_city(value: Any) -> Optional[str]:
 # ============================================================
 # UNIT NORMALIZATION
 # ============================================================
+
 
 def clean_unit(raw: Optional[str]) -> Optional[str]:
     if not raw:
@@ -259,6 +267,7 @@ def clean_unit(raw: Optional[str]) -> Optional[str]:
 # PRODUCT NAME NORMALIZATION
 # ============================================================
 
+
 def normalize_name(name: Optional[str]) -> str:
     if not name:
         return ""
@@ -267,10 +276,29 @@ def normalize_name(name: Optional[str]) -> str:
     s = re.sub(r"[\s\-_,.;:]+", " ", s)
 
     trash = [
-        "таблетки", "табл", "капсулы", "капс", "раствор",
-        "спрей", "мазь", "крем", "гель", "ампулы", "амп",
-        "фл", "флакон", "штука", "шт", "уп", "упаковка",
-        "№", "n", "ml", "мл", "mg", "мг",
+        "таблетки",
+        "табл",
+        "капсулы",
+        "капс",
+        "раствор",
+        "спрей",
+        "мазь",
+        "крем",
+        "гель",
+        "ампулы",
+        "амп",
+        "фл",
+        "флакон",
+        "штука",
+        "шт",
+        "уп",
+        "упаковка",
+        "№",
+        "n",
+        "ml",
+        "мл",
+        "mg",
+        "мг",
     ]
 
     for t in trash:
@@ -282,6 +310,7 @@ def normalize_name(name: Optional[str]) -> str:
 from typing import Iterable, List, TypeVar
 
 T = TypeVar("T")
+
 
 def chunked(iterable: Iterable[T], size: int):
     buf: List[T] = []

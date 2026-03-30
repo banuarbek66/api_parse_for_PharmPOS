@@ -2,9 +2,12 @@
 # ============================================================
 # ГЛОБАЛЬНЫЕ НАСТРОЙКИ ДЛЯ PHARM-POS SUPPLIER AGGREGATOR
 # ============================================================
-import models 
 from datetime import time
+
 from sqlalchemy.orm import Session
+
+import models
+
 # ------------------------------------------------------------
 # ⏱ ЧАСОВОЕ ОБНОВЛЕНИЕ (РАБОТАЕТ 24/7)
 # ------------------------------------------------------------
@@ -12,8 +15,8 @@ from sqlalchemy.orm import Session
 # В 00:00 таблица очищается, в 01:00 начинается новый цикл.
 # ------------------------------------------------------------
 
-HOURLY_SYNC_ACTIVE = True      # Флаг активности синхронизации
-HOURLY_SYNC_INTERVAL = 1       # Каждые 1 час
+HOURLY_SYNC_ACTIVE = True  # Флаг активности синхронизации
+HOURLY_SYNC_INTERVAL = 1  # Каждые 1 час
 
 
 # ------------------------------------------------------------
@@ -42,7 +45,7 @@ DAILY_RESTART_AT = time(hour=1, minute=0)
 # ------------------------------------------------------------
 # С 00:00 до 01:00 hourly пуста → используются данные из daily_products
 NIGHT_MODE_START = time(hour=0, minute=0)
-NIGHT_MODE_END   = time(hour=1, minute=0)
+NIGHT_MODE_END = time(hour=1, minute=0)
 
 
 # ------------------------------------------------------------
@@ -55,9 +58,9 @@ PROJECT_VERSION = "1.1.0"
 # ------------------------------------------------------------
 # 🔧 Настройки HTTP-запросов
 # ------------------------------------------------------------
-HTTP_TIMEOUT = 120     # таймаут запросов к API
-HTTP_RETRIES = 2        # повторные попытки
-HTTP_BACKOFF = 1        # задержка между попытками (сек)
+HTTP_TIMEOUT = 120  # таймаут запросов к API
+HTTP_RETRIES = 2  # повторные попытки
+HTTP_BACKOFF = 1  # задержка между попытками (сек)
 
 
 # ------------------------------------------------------------
@@ -69,6 +72,7 @@ MAX_PRODUCTS_PER_PROVIDER = 10000000
 ALLOW_EMPTY_FIELDS = True
 
 from schemas import SupplierUnitCreate
+
 
 def create_or_update_supplier_unit(db: Session, data: SupplierUnitCreate):
 
@@ -90,7 +94,7 @@ def create_or_update_supplier_unit(db: Session, data: SupplierUnitCreate):
     new = models.SupplierUnit(
         provider_name=data.provider_name,
         supplier_unit=data.supplier_unit,
-        normalized_unit=data.normalized_unit
+        normalized_unit=data.normalized_unit,
     )
 
     db.add(new)
