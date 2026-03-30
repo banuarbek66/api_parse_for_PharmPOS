@@ -83,6 +83,7 @@ from views import (
     SupplierAdmin,
     SupplierMappingAdmin,
     SupplierUnitAdmin,
+    ClietnAdmin,
 )
 
 # ✅ ADMIN
@@ -98,3 +99,4 @@ admin.add_view(HourlyProductAdmin)
 admin.add_view(DailyProductAdmin)
 admin.add_view(StockMovementAdmin)
 admin.add_view(ProductCompareAdmin)
+admin.add_view(ClietnAdmin)
